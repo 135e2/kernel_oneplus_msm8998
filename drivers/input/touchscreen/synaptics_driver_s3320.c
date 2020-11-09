@@ -1472,7 +1472,7 @@ static inline void int_touch(void)
 		}
 		if (finger_status) {
 #ifdef CONFIG_DYNAMIC_STUNE
-			last_input_time = jiffies;
+			WRITE_ONCE(last_input_time, jiffies);
 #endif /* CONFIG_DYNAMIC_STUNE */
 			input_mt_slot(ts->input_dev, i);
 			input_mt_report_slot_state(ts->input_dev,

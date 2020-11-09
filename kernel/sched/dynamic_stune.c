@@ -1,139 +1,115 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
+ * Dynamic Schedtune Driver
  * Copyright (C) 2020 Edrick Vince Sinsuan <sedrickvince@gmail.com>.
  */
 
-#include <linux/workqueue.h>
 #include <linux/dynamic_stune.h>
 
 #include "tune.h"
 
-/*
- * Driver variables and structures
- */
-struct stune_val {
-	struct workqueue_struct *wq;
-	struct work_struct enable;
-	struct delayed_work disable;
-};
-
-/* Boost value structures */
-static struct stune_val boost, crucial;
-
-/* Mutex locks */
-struct mutex boost_lock, crucial_lock;
-
 /* Last time an event occured */
 unsigned long last_boost_time, last_crucial_time;
 
-static __always_inline void set_stune_boost(bool enable)
+/*
+ * Common queue function
+ */
+static __always_inline 
+void enable_stune(struct dstune_val *ds, unsigned short duration)
+{
+	if (!mod_delayed_work(ds->wq, &ds->disable, duration))
+		ds->set_stune(true);
+
+	/* Update last_time after delaying work */
+	*ds->last_time = jiffies;
+}
+
+/*
+ * Boost structure
+ */
+static void set_stune_boost(bool state)
 {
 	/*
 	 * Enable boost and prefer_idle in order to bias migrating top-app 
 	 * (also for foreground) tasks to idle big cluster cores.
 	 */
-	do_boost("top-app", enable);
-	do_prefer_idle("top-app", enable);
-	do_prefer_idle("foreground", enable);
+	do_boost("top-app", state);
+	do_prefer_idle("top-app", state);
+	do_prefer_idle("foreground", state);
 }
 
-static __always_inline void set_stune_crucial(bool enable)
+static void enable_boost(struct work_struct *work)
+{
+	enable_stune(&boost, BOOST_DURATION);
+}
+
+static void disable_boost(struct work_struct *work)
+{
+	set_stune_boost(false);
+}
+
+struct dstune_val boost = {
+	.last_time = &last_boost_time,
+	.enable = __WORK_INITIALIZER(boost.enable, enable_boost),
+	.disable = __DELAYED_WORK_INITIALIZER(boost.disable, disable_boost, 0),
+	.set_stune = &set_stune_boost
+};
+
+/*
+ * Crucial structure
+ */
+static void set_stune_crucial(bool state)
 {
 	/*
 	 * Use idle cpus with the highest original capacity for top-app when it
 	 * comes to app launches and transitions in order to speed up 
 	 * the process and efficiently consume power.
 	 */
-	do_crucial("top-app", enable);
+	do_crucial("top-app", state);
 }
 
-static __always_inline
-void trigger_event(struct stune_val *stune, struct mutex *stune_lock, 
-	unsigned long *last_time, unsigned short duration)
+static void enable_crucial(struct work_struct *work)
 {
-	mutex_lock(stune_lock);
-
-	if (!mod_delayed_work(stune->wq, &stune->disable, duration))
-		queue_work(stune->wq, &stune->enable);
-
-	/* Update time parameters after delaying and/or queueing work */
-	*last_time = jiffies;
-
-	mutex_unlock(stune_lock);
+	enable_stune(&crucial, CRUCIAL_DURATION);
 }
 
-static void trigger_boost(struct work_struct *work)
-{
-	set_stune_boost(true);
-}
-
-static void trigger_crucial(struct work_struct *work)
-{
-	set_stune_crucial(true);
-}
-
-static void boost_remove(struct work_struct *work)
-{
-	set_stune_boost(false);
-}
-
-static void crucial_remove(struct work_struct *work)
+static void disable_crucial(struct work_struct *work)
 {
 	set_stune_crucial(false);
 }
 
-void dynstune_boost(void)
-{
-	trigger_event(&boost, &boost_lock, 
-		&last_boost_time, BOOST_DURATION);
-}
+struct dstune_val crucial = {
+	.last_time = &last_crucial_time,
+	.enable = __WORK_INITIALIZER(crucial.enable, enable_crucial),
+	.disable = __DELAYED_WORK_INITIALIZER(crucial.disable, disable_crucial, 0),
+	.set_stune = &set_stune_crucial
+};
 
-void dynstune_crucial(void)
+/*
+ * Init functions
+ */
+static __always_inline 
+int init_dstune_workqueue(struct dstune_val *ds, const char namefmt[])
 {
-	trigger_event(&crucial, &crucial_lock, 
-		&last_crucial_time, CRUCIAL_DURATION);
-}
-
-static void destroy_stune_workqueues(void)
-{
-	if (boost.wq)
-		destroy_workqueue(boost.wq);
-	if (crucial.wq)
-		destroy_workqueue(crucial.wq);
-}
-
-static int init_stune_workqueues(void)
-{
-	boost.wq = alloc_ordered_workqueue("boost_stune_wq", WQ_HIGHPRI);
-	if (!boost.wq)
+	ds->wq = alloc_ordered_workqueue(namefmt, WQ_HIGHPRI);
+	if (!ds->wq)
 		return -ENOMEM;
-
-	INIT_WORK(&boost.enable, trigger_boost);	
-	INIT_DELAYED_WORK(&boost.disable, boost_remove);
-
-	crucial.wq = alloc_ordered_workqueue("crucial_stune_wq", WQ_HIGHPRI);
-	if (!crucial.wq)
-		return -ENOMEM;
-
-	INIT_WORK(&crucial.enable, trigger_crucial);
-	INIT_DELAYED_WORK(&crucial.disable, crucial_remove);
 
 	return 0;
 }
 
 static int __init dynamic_stune_init(void)
 {
-	int ret;
+	int ret = 0;
 
-	ret = init_stune_workqueues();
-	if (ret) {
-		destroy_stune_workqueues();
+	ret = init_dstune_workqueue(&boost, "dstune_boost_wq");
+	if (ret)
 		return ret;
-	}
 
-	mutex_init(&boost_lock);
-	mutex_init(&crucial_lock);
+	ret = init_dstune_workqueue(&crucial, "dstune_crucial_wq");
+	if (ret)
+		destroy_workqueue(boost.wq);
 
-	return 0;
+	return ret;
 }
 late_initcall(dynamic_stune_init);
