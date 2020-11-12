@@ -54,10 +54,6 @@
 #include <linux/notifier.h>
 #endif
 
-#ifdef CONFIG_DYNAMIC_STUNE
-#include <linux/dynamic_stune.h>
-#endif /* CONFIG_DYNAMIC_STUNE */
-
 #include <linux/input/mt.h>
 
 #include "synaptics_redremote.h"
@@ -235,10 +231,6 @@ static struct Coordinate Point_2nd;
 static struct Coordinate Point_3rd;
 static struct Coordinate Point_4th;
 #endif
-
-#ifdef CONFIG_DYNAMIC_STUNE
-unsigned long last_input_time;
-#endif /* CONFIG_DYNAMIC_STUNE */
 
 /*-------------------------Global Registers------------------------------*/
 static unsigned short SynaF34DataBase;
@@ -1458,9 +1450,6 @@ static inline void int_touch(void)
 			points.y = 1919 - points.y;
 		}
 		if (finger_status) {
-#ifdef CONFIG_DYNAMIC_STUNE
-			WRITE_ONCE(last_input_time, jiffies);
-#endif /* CONFIG_DYNAMIC_STUNE */
 			input_mt_slot(ts->input_dev, i);
 			input_mt_report_slot_state(ts->input_dev,
 						   MT_TOOL_FINGER,
