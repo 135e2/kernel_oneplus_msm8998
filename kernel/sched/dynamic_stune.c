@@ -8,25 +8,19 @@
 
 #include "tune.h"
 
-/* Last time an event occured */
 unsigned long last_boost_time, last_crucial_time;
 
-/*
- * Common queue function
- */
 static __always_inline 
 void enable_stune(struct dstune_val *ds, unsigned short duration)
 {
-	if (!mod_delayed_work(ds->wq, &ds->disable, duration))
+	/* Queue disable_boost on LP cluster */
+	if (!mod_delayed_work_on(DD_CPU, ds->wq, &ds->disable, duration))
 		ds->set_stune(true);
 
 	/* Update last_time after delaying work */
 	*ds->last_time = jiffies;
 }
 
-/*
- * Boost structure
- */
 static void set_stune_boost(bool state)
 {
 	/*
@@ -55,9 +49,6 @@ struct dstune_val boost = {
 	.set_stune = &set_stune_boost
 };
 
-/*
- * Crucial structure
- */
 static void set_stune_crucial(bool state)
 {
 	/*
@@ -85,13 +76,10 @@ struct dstune_val crucial = {
 	.set_stune = &set_stune_crucial
 };
 
-/*
- * Init functions
- */
 static __always_inline 
 int init_dstune_workqueue(struct dstune_val *ds, const char namefmt[])
 {
-	ds->wq = alloc_ordered_workqueue(namefmt, WQ_HIGHPRI);
+	ds->wq = alloc_workqueue(namefmt, WQ_HIGHPRI | WQ_FREEZABLE, 1);
 	if (!ds->wq)
 		return -ENOMEM;
 
