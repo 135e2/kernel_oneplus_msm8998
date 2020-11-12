@@ -10,18 +10,7 @@
 
 unsigned long last_boost_time, last_crucial_time;
 
-static __always_inline 
-void enable_stune(struct dstune_val *ds, unsigned short duration)
-{
-	/* Queue disable_boost on LP cluster */
-	if (!mod_delayed_work_on(DD_CPU, ds->wq, &ds->disable, duration))
-		ds->set_stune(true);
-
-	/* Update last_time after delaying work */
-	*ds->last_time = jiffies;
-}
-
-static void set_stune_boost(bool state)
+static __always_inline void set_stune_boost(bool state)
 {
 	/*
 	 * Enable boost and prefer_idle in order to bias migrating top-app 
@@ -34,7 +23,7 @@ static void set_stune_boost(bool state)
 
 static void enable_boost(struct work_struct *work)
 {
-	enable_stune(&boost, BOOST_DURATION);
+	set_stune_boost(true);
 }
 
 static void disable_boost(struct work_struct *work)
@@ -46,10 +35,10 @@ struct dstune_val boost = {
 	.last_time = &last_boost_time,
 	.enable = __WORK_INITIALIZER(boost.enable, enable_boost),
 	.disable = __DELAYED_WORK_INITIALIZER(boost.disable, disable_boost, 0),
-	.set_stune = &set_stune_boost
+	.lock = ATOMIC_INIT(0)
 };
 
-static void set_stune_crucial(bool state)
+static __always_inline void set_stune_crucial(bool state)
 {
 	/*
 	 * Use idle cpus with the highest original capacity for top-app when it
@@ -61,7 +50,7 @@ static void set_stune_crucial(bool state)
 
 static void enable_crucial(struct work_struct *work)
 {
-	enable_stune(&crucial, CRUCIAL_DURATION);
+	set_stune_crucial(true);
 }
 
 static void disable_crucial(struct work_struct *work)
@@ -73,7 +62,7 @@ struct dstune_val crucial = {
 	.last_time = &last_crucial_time,
 	.enable = __WORK_INITIALIZER(crucial.enable, enable_crucial),
 	.disable = __DELAYED_WORK_INITIALIZER(crucial.disable, disable_crucial, 0),
-	.set_stune = &set_stune_crucial
+	.lock = ATOMIC_INIT(0)
 };
 
 static __always_inline 

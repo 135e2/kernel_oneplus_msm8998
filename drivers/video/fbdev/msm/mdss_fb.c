@@ -5437,9 +5437,8 @@ int mdss_fb_do_ioctl(struct fb_info *info, unsigned int cmd,
 	case MSMFB_ATOMIC_COMMIT:
 #ifdef CONFIG_DYNAMIC_STUNE
 		if (time_is_before_jiffies(BOOST_CLEARANCE) && 
-			time_is_after_jiffies(INPUT_INTERVAL) && 
-			dynstune_allowed(boost))
-			dynstune_trigger(boost);
+			time_is_after_jiffies(INPUT_INTERVAL))
+			dynstune_trigger(&boost, BOOST_DURATION);
 #endif /* CONFIG_DYNAMIC_STUNE */
 		ret = mdss_fb_atomic_commit_ioctl(info, argp, file);
 		break;
