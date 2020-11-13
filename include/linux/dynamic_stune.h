@@ -7,8 +7,7 @@
 #ifndef _DYNAMIC_STUNE_H_
 #define _DYNAMIC_STUNE_H_
 
-#include <linux/cpumask.h>
-#include <linux/workqueue.h>
+#include <linux/kthread.h>
 
 #define BOOST_DURATION msecs_to_jiffies(CONFIG_STUNE_BOOST_DURATION)
 #define CRUCIAL_DURATION msecs_to_jiffies(CONFIG_STUNE_CRUCIAL_DURATION)
@@ -19,33 +18,34 @@ extern unsigned long last_input_time, last_boost_time, last_crucial_time;
 #define BOOST_CLEARANCE (last_boost_time + (BOOST_DURATION >> 1))
 #define CRUCIAL_CLEARANCE (last_crucial_time + (CRUCIAL_DURATION >> 1))
 
-#define DT_CPU cpumask_first_and(cpu_perf_mask, cpu_active_mask)
-#define DD_CPU cpumask_first_and(cpu_lp_mask, cpu_active_mask)
+#define STATE_BIT BIT(0)
 
-struct dstune_val {
-	unsigned long *last_time;
-	struct workqueue_struct *wq;
-	struct work_struct enable;
-	struct delayed_work disable;
+struct dstune {
+	wait_queue_head_t waitq;
 	atomic_t lock;
+	unsigned int state;
 };
 
-extern struct dstune_val boost, crucial;
+extern struct dstune boost, crucial;
 
-static __always_inline 
-void dynstune_trigger(struct dstune_val *ds, unsigned short duration)
+static __always_inline void dynstune_trigger(struct dstune *ds, bool enable)
 {
-	if (atomic_cmpxchg(&ds->lock, 0, 1))
+    bool state;
+
+	if (atomic_cmpxchg_acquire(&ds->lock, 0, 1))
 		return;
 
-	/* Queue disable_boost on LP cluster */
-	if (!mod_delayed_work_on(DD_CPU, ds->wq, &ds->disable, duration))
-		queue_work_on(DT_CPU, ds->wq, &ds->enable);
+    state = ds->state & STATE_BIT;
 
-	/* Update last_time after queueing */
-	*ds->last_time = jiffies;
+    if (!state && enable)
+        ds->state |= STATE_BIT;
+    else if (state && !enable)
+        ds->state &= ~STATE_BIT;
 
-	atomic_set_release(&ds->lock, 0);
+	wake_up(&ds->waitq);
 }
+
+#define enable_boost() dynstune_trigger(&boost, true)
+#define enable_crucial() dynstune_trigger(&crucial, true)
 
 #endif /* _DYNAMIC_STUNE_H_ */
