@@ -12,13 +12,10 @@
 
 #define DS_CPU cpumask_first_and(cpu_lp_mask, cpu_active_mask)
 
-unsigned long last_boost_time, last_crucial_time;
-
 struct dstune_priv {
 	struct dstune *ds;
 	struct delayed_work disable;
-	unsigned short duration;
-	unsigned long *last_time;
+	unsigned long duration;
 	void (*set_stune)(bool state);
 };
 
@@ -50,7 +47,6 @@ static struct dstune_priv boost_priv = {
 	.ds = &boost,
 	.disable = __DELAYED_WORK_INITIALIZER(boost_priv.disable, disable_boost, 0),
 	.duration = CONFIG_STUNE_BOOST_DURATION,
-	.last_time = &last_boost_time,
 	.set_stune = &set_stune_boost
 };
 
@@ -81,7 +77,6 @@ static struct dstune_priv crucial_priv = {
 	.ds = &crucial,
 	.disable = __DELAYED_WORK_INITIALIZER(crucial_priv.disable, disable_crucial, 0),
 	.duration = CONFIG_STUNE_CRUCIAL_DURATION,
-	.last_time = &last_crucial_time,
 	.set_stune = &set_stune_crucial
 };
 
@@ -91,16 +86,16 @@ static int dstune_thread(void *data)
 		.sched_priority = MAX_RT_PRIO - 1
 	};
 	struct dstune_priv *ds_priv = data;
-	unsigned int old_state = 0;
+	unsigned long old_state = 0;
 
 	sched_setscheduler_nocheck(current, SCHED_FIFO, &sched_max_rt_prio);
 
 	while (1) {
-		unsigned int curr_state;
+		unsigned long curr_state, duration;
 		bool should_stop = false, curr, old;
 
 		wait_event(ds_priv->ds->waitq, 
-			(atomic_read(&ds_priv->ds->lock) == 1) || 
+			atomic_read(&ds_priv->ds->lock) || 
 			(should_stop = kthread_should_stop()));
 
 		if (should_stop)
@@ -111,18 +106,20 @@ static int dstune_thread(void *data)
 		curr = curr_state & STATE_BIT;
 		old = old_state & STATE_BIT;
 
-		if (curr) {
-			mod_delayed_work_on(DS_CPU, system_highpri_wq, 
-				&ds_priv->disable, msecs_to_jiffies(ds_priv->duration));
-
-			/* Update last_time after delaying */
-			*ds_priv->last_time = jiffies;
-		}
-
 		if (!((curr && old) || (!curr && !old)))
 			ds_priv->set_stune(curr);
 
 		old_state = curr_state;
+
+		if (curr) {
+			duration = msecs_to_jiffies(ds_priv->duration);
+
+			mod_delayed_work_on(DS_CPU, system_highpri_wq, 
+				&ds_priv->disable, duration);
+
+			schedule_timeout_uninterruptible(duration >> 1);
+		}
+
 		atomic_set_release(&ds_priv->ds->lock, 0);
 	}
 

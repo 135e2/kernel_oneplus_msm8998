@@ -9,21 +9,17 @@
 
 #include <linux/kthread.h>
 
-#define BOOST_DURATION msecs_to_jiffies(CONFIG_STUNE_BOOST_DURATION)
-#define CRUCIAL_DURATION msecs_to_jiffies(CONFIG_STUNE_CRUCIAL_DURATION)
 #define INPUT_DURATION msecs_to_jiffies(CONFIG_INPUT_INTERVAL_DURATION)
 
-extern unsigned long last_input_time, last_boost_time, last_crucial_time;
+extern unsigned long last_input_time;
 #define INPUT_INTERVAL (last_input_time + INPUT_DURATION)
-#define BOOST_CLEARANCE (last_boost_time + (BOOST_DURATION >> 1))
-#define CRUCIAL_CLEARANCE (last_crucial_time + (CRUCIAL_DURATION >> 1))
 
 #define STATE_BIT BIT(0)
 
 struct dstune {
 	wait_queue_head_t waitq;
 	atomic_t lock;
-	unsigned int state;
+	unsigned long state;
 };
 
 extern struct dstune boost, crucial;
