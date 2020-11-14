@@ -4,13 +4,10 @@
  * Copyright (C) 2020 Edrick Vince Sinsuan <sedrickvince@gmail.com>.
  */
 
-#include <linux/cpumask.h>
 #include <linux/sched.h>
 #include <linux/dynamic_stune.h>
 
 #include "tune.h"
-
-#define DS_CPU cpumask_first_and(cpu_lp_mask, cpu_active_mask)
 
 struct dstune_priv {
 	struct dstune *ds;
@@ -86,13 +83,13 @@ static int dstune_thread(void *data)
 		.sched_priority = MAX_RT_PRIO - 1
 	};
 	struct dstune_priv *ds_priv = data;
-	unsigned long old_state = 0;
+	bool old = false;
 
 	sched_setscheduler_nocheck(current, SCHED_FIFO, &sched_max_rt_prio);
 
 	while (1) {
-		unsigned long curr_state, duration;
-		bool should_stop = false, curr, old;
+		unsigned long duration;
+		bool should_stop = false, curr;
 
 		wait_event(ds_priv->ds->waitq, 
 			atomic_read(&ds_priv->ds->lock) || 
@@ -101,25 +98,18 @@ static int dstune_thread(void *data)
 		if (should_stop)
 			break;
 
-		curr_state = ds_priv->ds->state;
+		curr = ds_priv->ds->state;
 
-		curr = curr_state & STATE_BIT;
-		old = old_state & STATE_BIT;
-
-		if (!((curr && old) || (!curr && !old)))
+		if (curr != old)
 			ds_priv->set_stune(curr);
-
-		old_state = curr_state;
 
 		if (curr) {
 			duration = msecs_to_jiffies(ds_priv->duration);
-
-			mod_delayed_work_on(DS_CPU, system_highpri_wq, 
-				&ds_priv->disable, duration);
-
+			mod_delayed_work(system_unbound_wq, &ds_priv->disable, duration);
 			schedule_timeout_uninterruptible(duration >> 1);
 		}
 
+		old = curr;
 		atomic_set_release(&ds_priv->ds->lock, 0);
 	}
 
@@ -131,7 +121,7 @@ static int dstune_kthread_init(struct dstune_priv *ds_priv, const char namefmt[]
 	struct task_struct *thread;
 	int ret = 0;
 
-	thread = kthread_run_perf_critical(dstune_thread, ds_priv, namefmt);
+	thread = kthread_run(dstune_thread, ds_priv, namefmt);
 	if (IS_ERR(thread)) {
 		ret = PTR_ERR(thread);
 		pr_err("Failed to start stune thread, err: %d\n", ret);

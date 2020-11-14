@@ -14,31 +14,20 @@
 extern unsigned long last_input_time;
 #define INPUT_INTERVAL (last_input_time + INPUT_DURATION)
 
-#define STATE_BIT BIT(0)
-
 struct dstune {
 	wait_queue_head_t waitq;
 	atomic_t lock;
-	unsigned long state;
+	bool state;
 };
 
 extern struct dstune boost, crucial;
 
 static __always_inline void dynstune_trigger(struct dstune *ds, bool enable)
 {
-    bool state;
-
-	if (atomic_cmpxchg_acquire(&ds->lock, 0, 1))
-		return;
-
-    state = ds->state & STATE_BIT;
-
-    if (!state && enable)
-        ds->state |= STATE_BIT;
-    else if (state && !enable)
-        ds->state &= ~STATE_BIT;
-
-	wake_up(&ds->waitq);
+	if (!atomic_cmpxchg_acquire(&ds->lock, 0, 1)) {
+        ds->state = enable;
+        wake_up(&ds->waitq);
+    }
 }
 
 #define enable_boost() dynstune_trigger(&boost, true)
