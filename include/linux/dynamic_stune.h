@@ -9,10 +9,8 @@
 
 #include <linux/kthread.h>
 
-#define INPUT_DURATION msecs_to_jiffies(CONFIG_INPUT_INTERVAL_DURATION)
-
-extern unsigned long last_input_time;
-#define INPUT_INTERVAL (last_input_time + INPUT_DURATION)
+extern unsigned long last_input_time, input_margin;
+#define INPUT_INTERVAL (last_input_time + input_margin)
 
 struct dstune {
 	wait_queue_head_t waitq;

@@ -16,6 +16,9 @@ struct dstune_priv {
 	void (*set_stune)(bool state);
 };
 
+/* Initialize input_margin */
+unsigned long input_margin;
+
 /*
  * Boost structure
  */
@@ -43,7 +46,6 @@ struct dstune boost = {
 static struct dstune_priv boost_priv = {
 	.ds = &boost,
 	.disable = __DELAYED_WORK_INITIALIZER(boost_priv.disable, disable_boost, 0),
-	.duration = CONFIG_STUNE_BOOST_DURATION,
 	.set_stune = &set_stune_boost
 };
 
@@ -73,7 +75,6 @@ struct dstune crucial = {
 static struct dstune_priv crucial_priv = {
 	.ds = &crucial,
 	.disable = __DELAYED_WORK_INITIALIZER(crucial_priv.disable, disable_crucial, 0),
-	.duration = CONFIG_STUNE_CRUCIAL_DURATION,
 	.set_stune = &set_stune_crucial
 };
 
@@ -104,7 +105,7 @@ static int dstune_thread(void *data)
 			ds_priv->set_stune(curr);
 
 		if (curr) {
-			duration = msecs_to_jiffies(ds_priv->duration);
+			duration = ds_priv->duration;
 			mod_delayed_work(system_unbound_wq, &ds_priv->disable, duration);
 			schedule_timeout_uninterruptible(duration >> 1);
 		}
@@ -130,6 +131,16 @@ static int dstune_kthread_init(struct dstune_priv *ds_priv, const char namefmt[]
 	return ret;
 }
 
+static void init_durations(void)
+{
+	boost_priv.duration =
+		msecs_to_jiffies(CONFIG_STUNE_BOOST_DURATION);
+	crucial_priv.duration =
+		msecs_to_jiffies(CONFIG_STUNE_CRUCIAL_DURATION);
+	input_margin =
+		msecs_to_jiffies(CONFIG_INPUT_INTERVAL_DURATION);
+}
+
 static int __init dynamic_stune_init(void)
 {
 	int ret = 0;
@@ -139,6 +150,11 @@ static int __init dynamic_stune_init(void)
 		goto err;
 
 	ret = dstune_kthread_init(&crucial_priv, "dstune_cruciald");
+	if (ret)
+		goto err;
+
+	/* Initialize duration values */
+	init_durations();
 err:
 	return ret;
 }
