@@ -14,7 +14,7 @@ struct dstune {
 	atomic_t trigger, update;
 };
 
-extern struct dstune boost, crucial, input;
+extern struct dstune fb, topcg, input;
 
 static __always_inline void dynstune_trigger(struct dstune *ds)
 {
@@ -28,11 +28,11 @@ static __always_inline void dynstune_trigger(struct dstune *ds)
 		wake_up(&ds->stage_2);
 }
 
-#define enable_boost() dynstune_trigger(&boost)
-#define enable_crucial() dynstune_trigger(&crucial)
+#define enable_fb() dynstune_trigger(&fb)
+#define enable_topcg() dynstune_trigger(&topcg)
 #define enable_input() dynstune_trigger(&input)
 
 /* Read trigger lock for checking if within interval */
-#define allow_boost() atomic_read(&input.trigger)
+#define allow_fb() atomic_read(&input.trigger)
 
 #endif /* _DYNAMIC_STUNE_H_ */

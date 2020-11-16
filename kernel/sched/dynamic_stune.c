@@ -16,9 +16,9 @@ struct dstune_priv {
 };
 
 /*
- * Boost structure
+ * Framebuffer structure
  */
-static void set_boost(bool state)
+static void set_fb(bool state)
 {
 	/*
 	 * Enable boost and prefer_idle in order to bias migrating top-app
@@ -29,22 +29,22 @@ static void set_boost(bool state)
 	do_prefer_idle("foreground", state);
 }
 
-struct dstune boost = {
-	.stage_1 = __WAIT_QUEUE_HEAD_INITIALIZER(boost.stage_1),
-	.stage_2 = __WAIT_QUEUE_HEAD_INITIALIZER(boost.stage_2),
+struct dstune fb = {
+	.stage_1 = __WAIT_QUEUE_HEAD_INITIALIZER(fb.stage_1),
+	.stage_2 = __WAIT_QUEUE_HEAD_INITIALIZER(fb.stage_2),
 	.trigger = ATOMIC_INIT(0),
 	.update = ATOMIC_INIT(0)
 };
 
-static struct dstune_priv boost_priv = {
-	.ds = &boost,
-	.set = &set_boost
+static struct dstune_priv fb_priv = {
+	.ds = &fb,
+	.set = &set_fb
 };
 
 /*
- * Crucial structure
+ * Top-app cgroup structure
  */
-static void set_crucial(bool state)
+static void set_topcg(bool state)
 {
 	/*
 	 * Use idle cpus with the highest original capacity for top-app when it
@@ -54,16 +54,16 @@ static void set_crucial(bool state)
 	do_crucial("top-app", state);
 }
 
-struct dstune crucial = {
-	.stage_1 = __WAIT_QUEUE_HEAD_INITIALIZER(crucial.stage_1),
-	.stage_2 = __WAIT_QUEUE_HEAD_INITIALIZER(crucial.stage_2),
+struct dstune topcg = {
+	.stage_1 = __WAIT_QUEUE_HEAD_INITIALIZER(topcg.stage_1),
+	.stage_2 = __WAIT_QUEUE_HEAD_INITIALIZER(topcg.stage_2),
 	.trigger = ATOMIC_INIT(0),
 	.update = ATOMIC_INIT(0)
 };
 
-static struct dstune_priv crucial_priv = {
-	.ds = &crucial,
-	.set = &set_crucial
+static struct dstune_priv topcg_priv = {
+	.ds = &topcg,
+	.set = &set_topcg
 };
 
 /*
@@ -158,23 +158,23 @@ static int dstune_kthread_init(struct dstune_priv *ds_priv, const char namefmt[]
 
 static void init_durations(void)
 {
-	boost_priv.duration =
-		msecs_to_jiffies(CONFIG_STUNE_BOOST_DURATION);
-	crucial_priv.duration =
-		msecs_to_jiffies(CONFIG_STUNE_CRUCIAL_DURATION);
+	fb_priv.duration =
+		msecs_to_jiffies(CONFIG_FB_STUNE_DURATION);
+	topcg_priv.duration =
+		msecs_to_jiffies(CONFIG_TOPCG_STUNE_DURATION);
 	input_priv.duration =
-		msecs_to_jiffies(CONFIG_INPUT_INTERVAL_DURATION);
+		msecs_to_jiffies(CONFIG_INPUT_STUNE_DURATION);
 }
 
 static int __init dynamic_stune_init(void)
 {
 	int ret = 0;
 
-	ret = dstune_kthread_init(&boost_priv, "dstune_boostd");
+	ret = dstune_kthread_init(&fb_priv, "dstune_fbd");
 	if (ret)
 		goto err;
 
-	ret = dstune_kthread_init(&crucial_priv, "dstune_cruciald");
+	ret = dstune_kthread_init(&topcg_priv, "dstune_topcgd");
 	if (ret)
 		goto err;
 
