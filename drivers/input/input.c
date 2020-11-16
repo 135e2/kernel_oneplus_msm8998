@@ -53,10 +53,6 @@ static DEFINE_MUTEX(input_mutex);
 
 static const struct input_value input_value_sync = { EV_SYN, SYN_REPORT, 1 };
 
-#ifdef CONFIG_DYNAMIC_STUNE
-unsigned long last_input_time;
-#endif /* CONFIG_DYNAMIC_STUNE */
-
 static inline int is_event_supported(unsigned int code,
 				     unsigned long *bm, unsigned int max)
 {
@@ -323,7 +319,7 @@ static int input_get_disposition(struct input_dev *dev,
 			disposition = input_handle_abs_event(dev, code, &value);
 #ifdef CONFIG_DYNAMIC_STUNE
 		if (disposition != INPUT_IGNORE_EVENT)
-			last_input_time = jiffies;
+			enable_input();
 #endif /* CONFIG_DYNAMIC_STUNE */
 
 		break;
