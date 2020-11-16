@@ -1384,28 +1384,29 @@ config DYNAMIC_STUNE
 
 if DYNAMIC_STUNE
 
-config STUNE_BOOST_DURATION
-	int "Dynamic schedtune framebuffer boost duration in milliseconds"
+config FB_STUNE_DURATION
+	int "Dynamic schedtune duration for framebuffer event in milliseconds"
 	range 10 10000
-	default 1000
+	default 500
 	help
-	  Determines how long after boost parameters are turned on after a framebuffer
-	  update.
+	  Determines how long defined schedtune parameters are turned on after a 
+	  framebuffer update.
 
-config STUNE_CRUCIAL_DURATION
-	int "Dynamic schedtune crucial duration in milliseconds"
+config TOPCG_STUNE_DURATION
+	int "Dynamic schedtune duration for top-app cgroup event in milliseconds"
 	range 10 10000
 	default 1500
 	help
-	  Determines how long crucial parameters are turned on after zygote and top-app
-	  forks.
+	  Determines how long defined schedtune parameters are turned on after 
+	  top-app proc writes.
 
-config INPUT_INTERVAL_DURATION
-	int "Dynamic schedtune input interval duration in milliseconds"
+config INPUT_STUNE_DURATION
+	int "Dynamic schedtune duration for input event in milliseconds"
 	range 10 10000
 	default 5000
 	help
-	  Determines how long can stune boost be triggered after a touch input.
+	  Determines how long defined schedtune parameters are turned on and 
+	  fb stune be triggered after a touch input.
 
 endif
 
