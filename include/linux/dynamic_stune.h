@@ -9,26 +9,30 @@
 
 #include <linux/kthread.h>
 
-extern unsigned long last_input_time, input_margin;
-#define INPUT_INTERVAL (last_input_time + input_margin)
-
 struct dstune {
-	wait_queue_head_t waitq;
-	atomic_t lock;
-	bool state;
+	wait_queue_head_t stage_1, stage_2;
+	atomic_t trigger, update;
 };
 
-extern struct dstune boost, crucial;
+extern struct dstune boost, crucial, input;
 
-static __always_inline void dynstune_trigger(struct dstune *ds, bool enable)
+static __always_inline void dynstune_trigger(struct dstune *ds)
 {
-	if (!atomic_cmpxchg_acquire(&ds->lock, 0, 1)) {
-        ds->state = enable;
-        wake_up(&ds->waitq);
-    }
+	/* Check update first as it'll be acquired the most */
+	if (atomic_cmpxchg_acquire(&ds->update, 0, 1))
+		return;
+
+	if (!atomic_cmpxchg_acquire(&ds->trigger, 0, 1))
+		wake_up(&ds->stage_1);
+	else
+		wake_up(&ds->stage_2);
 }
 
-#define enable_boost() dynstune_trigger(&boost, true)
-#define enable_crucial() dynstune_trigger(&crucial, true)
+#define enable_boost() dynstune_trigger(&boost)
+#define enable_crucial() dynstune_trigger(&crucial)
+#define enable_input() dynstune_trigger(&input)
+
+/* Read trigger lock for checking if within interval */
+#define allow_boost() atomic_read(&input.trigger)
 
 #endif /* _DYNAMIC_STUNE_H_ */
