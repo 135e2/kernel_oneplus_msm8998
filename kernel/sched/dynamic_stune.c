@@ -22,11 +22,12 @@ static void set_fb(bool state)
 {
 	/*
 	 * Enable boost and prefer_idle in order to bias migrating top-app
-	 * (also for foreground) tasks to idle big cluster cores.
+	 * tasks to idle big cluster cores. Also enable bias for foreground
+	 * to help with jitter reduction.
 	 */
 	do_boost("top-app", state);
 	do_prefer_idle("top-app", state);
-	do_prefer_idle("foreground", state);
+	do_boost_bias("foreground", state);
 }
 
 struct dstune fb = {
@@ -73,10 +74,9 @@ static void set_input(bool state)
 {
 	/*
 	 * Enable bias when an input is received to bias transfer of
-	 * top-app and foreground tasks to big cluster.
+	 * top-app tasks to big cluster.
 	 */
 	do_boost_bias("top-app", state);
-	do_boost_bias("foreground", state);	
 }
 
 struct dstune input = {

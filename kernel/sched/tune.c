@@ -807,8 +807,7 @@ static int prefer_idle_write_wrapper(struct cgroup_subsys_state *css,
 		return 0;
 
 #ifdef CONFIG_DYNAMIC_STUNE
-	if ((!strcmp(css->cgroup->kn->name, "top-app")) || 
-		(!strcmp(css->cgroup->kn->name, "foreground")))
+	if (!strcmp(css->cgroup->kn->name, "top-app"))
 		return 0;
 #endif /* CONFIG_DYNAMIC_STUNE */
 
