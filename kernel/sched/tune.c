@@ -1040,11 +1040,17 @@ static struct schedtune *stune_get_by_name(char *st_name)
 int do_boost(char *st_name, bool enable)
 {
 	struct schedtune *st = stune_get_by_name(st_name);
+	s64 boost;
 
 	if (!st)
 		return -EINVAL;
 
-	return boost_write(&st->css, NULL, enable ? st->dynamic_boost : 0);
+	boost = enable ? st->dynamic_boost : 0;
+
+	if (boost == st->boost)
+		return 0;
+
+	return boost_write(&st->css, NULL, boost);
 }
 
 int do_boost_bias(char *st_name, u64 boost_bias)
