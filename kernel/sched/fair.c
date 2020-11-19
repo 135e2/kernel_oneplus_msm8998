@@ -5051,6 +5051,14 @@ static unsigned long cpu_util_without(int cpu, struct task_struct *p);
 static inline unsigned long cpu_util_freq(int cpu);
 
 /*
+ * Check if task belongs to *st_name cgroup.
+ */
+static inline bool task_belongs_to_cgroup(struct task_struct *p, char *st_name)
+{
+	return !strcmp(task_css(p, schedtune_cgrp_id)->cgroup->kn->name, st_name);
+}
+
+/*
  * The enqueue_task method is called before nr_running is
  * increased. Here we update the fair scheduling stats and
  * then put the task into the rbtree:
@@ -5094,8 +5102,12 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	 * If in_iowait is set, the code below may not trigger any cpufreq
 	 * utilization updates, so do it here explicitly with the IOWAIT flag
 	 * passed.
+	 * 
+	 * We only trigger the iowait boost if only the task belongs to either
+	 * top-app or foreground cgroup.
 	 */
-	if (p->in_iowait)
+	if (p->in_iowait && (task_belongs_to_cgroup(p, "top-app") || 
+		task_belongs_to_cgroup(p, "foreground")))
 		cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
 
 	for_each_sched_entity(se) {
