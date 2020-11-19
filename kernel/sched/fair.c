@@ -7075,6 +7075,11 @@ static int start_cpu(bool boosted)
 	return boosted ? rd->max_cap_orig_cpu : rd->min_cap_orig_cpu;
 }
 
+/*
+ * Store last crucial cpu to avoid overscheduling on a target.
+ */
+static int last_crucial_cpu = -1;
+
 static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 				   bool boosted, bool prefer_idle, bool crucial)
 {
@@ -7152,6 +7157,10 @@ static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 			*/
 			if (crucial) {
 
+				/* Skip last crucial cpu */
+				if (last_crucial_cpu == i)
+					continue;
+
 				/* Only allow idle_cpus to be tracked, skip if not. */
 				if (idle_cpu(i)) {
 
@@ -7164,6 +7173,7 @@ static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 
 					crucial_max_cap = capacity_orig;
 					crucial_cpu = i;
+					last_crucial_cpu = i;
 					continue;
 				}
 				if (crucial_cpu != -1)
