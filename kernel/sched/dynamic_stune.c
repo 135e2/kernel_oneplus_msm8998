@@ -142,12 +142,14 @@ static int dstune_thread(void *data)
 	return 0;
 }
 
-static int dstune_kthread_init(struct dstune_priv *ds_priv, const char namefmt[])
+static int dstune_kthread_init(struct dstune_priv *ds_priv, const char namefmt[],
+	bool perf_critical)
 {
 	struct task_struct *thread;
 	int ret = 0;
 
-	thread = kthread_run(dstune_thread, ds_priv, namefmt);
+	thread = !perf_critical ? kthread_run(dstune_thread, ds_priv, namefmt) :
+		kthread_run_perf_critical(dstune_thread, ds_priv, namefmt);
 	if (IS_ERR(thread)) {
 		ret = PTR_ERR(thread);
 		pr_err("Failed to start stune thread, err: %d\n", ret);
@@ -170,15 +172,15 @@ static int __init dynamic_stune_init(void)
 {
 	int ret = 0;
 
-	ret = dstune_kthread_init(&fb_priv, "dstune_fbd");
+	ret = dstune_kthread_init(&fb_priv, "dstune_fbd", true);
 	if (ret)
 		goto err;
 
-	ret = dstune_kthread_init(&topcg_priv, "dstune_topcgd");
+	ret = dstune_kthread_init(&topcg_priv, "dstune_topcgd", false);
 	if (ret)
 		goto err;
 
-	ret = dstune_kthread_init(&input_priv, "dstune_inputd");
+	ret = dstune_kthread_init(&input_priv, "dstune_inputd", false);
 	if (ret)
 		goto err;
 
