@@ -923,6 +923,16 @@ void add_interrupt_randomness(int irq, int irq_flags)
 	fast_mix(fast_pool);
 	add_interrupt_bench(cycles);
 
+	if (!crng_ready()) {
+		if ((fast_pool->count >= 64) &&
+		    crng_fast_load((char *) fast_pool->pool,
+				   sizeof(fast_pool->pool))) {
+			fast_pool->count = 0;
+			fast_pool->last = now;
+		}
+		return;
+	}
+
 	if ((fast_pool->count < 64) &&
 	    !time_after(now, fast_pool->last + HZ))
 		return;
