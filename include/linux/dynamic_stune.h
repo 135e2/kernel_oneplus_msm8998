@@ -10,7 +10,7 @@
 #include <linux/kthread.h>
 
 struct dstune {
-	wait_queue_head_t stage_1, stage_2;
+	wait_queue_head_t waitq;
 	atomic_t trigger, update;
 };
 
@@ -19,13 +19,10 @@ extern struct dstune fb, topcg, input;
 static __always_inline void dynstune_trigger(struct dstune *ds)
 {
 	/* Check update first as it'll be acquired the most */
-	if (atomic_cmpxchg_acquire(&ds->update, 0, 1))
-		return;
-
-	if (!atomic_cmpxchg_acquire(&ds->trigger, 0, 1))
-		wake_up(&ds->stage_1);
-	else
-		wake_up(&ds->stage_2);
+	if (!atomic_cmpxchg_acquire(&ds->update, 0, 1)) {
+		atomic_cmpxchg_acquire(&ds->trigger, 0, 1);
+		wake_up(&ds->waitq);
+	}
 }
 
 #define enable_fb() dynstune_trigger(&fb)
