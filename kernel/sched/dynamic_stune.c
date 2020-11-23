@@ -31,8 +31,7 @@ static void set_fb(bool state)
 }
 
 struct dstune fb = {
-	.stage_1 = __WAIT_QUEUE_HEAD_INITIALIZER(fb.stage_1),
-	.stage_2 = __WAIT_QUEUE_HEAD_INITIALIZER(fb.stage_2),
+	.waitq = __WAIT_QUEUE_HEAD_INITIALIZER(fb.waitq),
 	.trigger = ATOMIC_INIT(0),
 	.update = ATOMIC_INIT(0)
 };
@@ -56,8 +55,7 @@ static void set_topcg(bool state)
 }
 
 struct dstune topcg = {
-	.stage_1 = __WAIT_QUEUE_HEAD_INITIALIZER(topcg.stage_1),
-	.stage_2 = __WAIT_QUEUE_HEAD_INITIALIZER(topcg.stage_2),
+	.waitq = __WAIT_QUEUE_HEAD_INITIALIZER(topcg.waitq),
 	.trigger = ATOMIC_INIT(0),
 	.update = ATOMIC_INIT(0)
 };
@@ -80,8 +78,7 @@ static void set_input(bool state)
 }
 
 struct dstune input = {
-	.stage_1 = __WAIT_QUEUE_HEAD_INITIALIZER(input.stage_1),
-	.stage_2 = __WAIT_QUEUE_HEAD_INITIALIZER(input.stage_2),
+	.waitq = __WAIT_QUEUE_HEAD_INITIALIZER(input.waitq),
 	.trigger = ATOMIC_INIT(0),
 	.update = ATOMIC_INIT(0)
 };
@@ -103,7 +100,7 @@ static int dstune_thread(void *data)
 	while (1) {
 		bool should_stop = false;
 
-		wait_event(ds_priv->ds->stage_1,
+		wait_event(ds_priv->ds->waitq,
 			atomic_read(&ds_priv->ds->trigger) ||
 			(should_stop = kthread_should_stop()));
 
@@ -115,7 +112,7 @@ static int dstune_thread(void *data)
 		while (1) {
 			unsigned long time;
 
-			time = wait_event_timeout(ds_priv->ds->stage_2,
+			time = wait_event_timeout(ds_priv->ds->waitq,
 				atomic_read(&ds_priv->ds->update) ||
 				(should_stop = kthread_should_stop()),
 				ds_priv->duration);
