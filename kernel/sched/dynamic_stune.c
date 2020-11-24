@@ -68,14 +68,7 @@ static struct dstune_priv topcg_priv = {
 /*
  * Input structure
  */
-static void set_input(bool state) 
-{
-	/*
-	 * Enable bias when an input is received to bias transfer of
-	 * top-app tasks to big cluster.
-	 */
-	do_boost_bias("top-app", state);
-}
+static void set_input(bool state) {}
 
 struct dstune input = {
 	.waitq = __WAIT_QUEUE_HEAD_INITIALIZER(input.waitq),
