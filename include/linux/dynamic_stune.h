@@ -11,25 +11,23 @@
 
 struct dstune {
 	wait_queue_head_t waitq;
-	atomic_t trigger, update;
+	atomic_t update;
 };
 
 extern struct dstune fb, topcg, input;
+extern atomic_t input_lock;
 
 static __always_inline void dynstune_trigger(struct dstune *ds)
 {
-	/* Check update first as it'll be acquired the most */
-	if (!atomic_cmpxchg_acquire(&ds->update, 0, 1)) {
-		atomic_cmpxchg_acquire(&ds->trigger, 0, 1);
+	if (!atomic_cmpxchg_acquire(&ds->update, 0, 1))
 		wake_up(&ds->waitq);
-	}
 }
 
 #define enable_fb() dynstune_trigger(&fb)
 #define enable_topcg() dynstune_trigger(&topcg)
 #define enable_input() dynstune_trigger(&input)
 
-/* Read trigger lock for checking if within interval */
-#define allow_fb() atomic_read(&input.trigger)
+/* Read input lock for checking if within interval */
+#define allow_fb() atomic_read(&input_lock)
 
 #endif /* _DYNAMIC_STUNE_H_ */
