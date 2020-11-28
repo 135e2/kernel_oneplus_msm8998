@@ -32,7 +32,6 @@ static void set_fb(bool state)
 
 struct dstune fb = {
 	.waitq = __WAIT_QUEUE_HEAD_INITIALIZER(fb.waitq),
-	.trigger = ATOMIC_INIT(0),
 	.update = ATOMIC_INIT(0)
 };
 
@@ -56,7 +55,6 @@ static void set_topcg(bool state)
 
 struct dstune topcg = {
 	.waitq = __WAIT_QUEUE_HEAD_INITIALIZER(topcg.waitq),
-	.trigger = ATOMIC_INIT(0),
 	.update = ATOMIC_INIT(0)
 };
 
@@ -68,11 +66,16 @@ static struct dstune_priv topcg_priv = {
 /*
  * Input structure
  */
-static void set_input(bool state) {}
+atomic_t input_lock = ATOMIC_INIT(0);
+
+static void set_input(bool state)
+{
+	/* Set lock to be checked by fb structure */
+	atomic_set(&input_lock, state);
+}
 
 struct dstune input = {
 	.waitq = __WAIT_QUEUE_HEAD_INITIALIZER(input.waitq),
-	.trigger = ATOMIC_INIT(0),
 	.update = ATOMIC_INIT(0)
 };
 
@@ -94,7 +97,7 @@ static int dstune_thread(void *data)
 		bool should_stop = false;
 
 		wait_event(ds_priv->ds->waitq,
-			atomic_read(&ds_priv->ds->trigger) ||
+			atomic_read(&ds_priv->ds->update) ||
 			(should_stop = kthread_should_stop()));
 
 		if (should_stop)
@@ -103,29 +106,23 @@ static int dstune_thread(void *data)
 		ds_priv->set(true);
 
 		while (1) {
-			unsigned long time;
+			unsigned long time = ds_priv->duration;
+
+			atomic_set_release(&ds_priv->ds->update, 0);
 
 			time = wait_event_timeout(ds_priv->ds->waitq,
 				atomic_read(&ds_priv->ds->update) ||
-				(should_stop = kthread_should_stop()),
-				ds_priv->duration);
+				(should_stop = kthread_should_stop()), time);
 
-			/* Continue to loop until !time */
 			if (should_stop || !time)
 				break;
 
-			/* Delay release with the remaining time */
 			while (time)
 				time = schedule_timeout_uninterruptible(time);
-
-			/* Allow update atomic to be acquired */
-			atomic_set_release(&ds_priv->ds->update, 0);
 		}
 
 		ds_priv->set(false);
 
-		/* Release all atomic */
-		atomic_set_release(&ds_priv->ds->trigger, 0);
 		atomic_set_release(&ds_priv->ds->update, 0);
 	}
 
@@ -174,7 +171,6 @@ static int __init dynamic_stune_init(void)
 	if (ret)
 		goto err;
 
-	/* Initialize duration values */
 	init_durations();
 err:
 	return ret;
