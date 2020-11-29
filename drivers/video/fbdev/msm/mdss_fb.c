@@ -5436,8 +5436,8 @@ int mdss_fb_do_ioctl(struct fb_info *info, unsigned int cmd,
 		break;
 	case MSMFB_ATOMIC_COMMIT:
 #ifdef CONFIG_DYNAMIC_STUNE
-		if (allow_fb())
-			enable_fb();
+		if (atomic_read(&input_lock))
+			dynstune_trigger(FB);
 #endif /* CONFIG_DYNAMIC_STUNE */
 		ret = mdss_fb_atomic_commit_ioctl(info, argp, file);
 		break;

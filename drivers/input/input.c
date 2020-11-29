@@ -319,7 +319,7 @@ static int input_get_disposition(struct input_dev *dev,
 			disposition = input_handle_abs_event(dev, code, &value);
 #ifdef CONFIG_DYNAMIC_STUNE
 		if (disposition != INPUT_IGNORE_EVENT)
-			enable_input();
+			dynstune_trigger(INPUT);
 #endif /* CONFIG_DYNAMIC_STUNE */
 
 		break;
