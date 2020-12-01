@@ -10,11 +10,15 @@
 #include "tune.h"
 
 struct dstune_priv {
-	char name[NAME_MAX];
 	struct dstune *ds;
 	unsigned long duration;
-	bool perf_critical;
 	void (*set_func)(bool state);
+};
+
+struct dstune_init {
+	char *name;
+	unsigned long duration;
+	void *setaddr;
 };
 
 static struct dstune_priv dss_priv[DT_MAX];
@@ -104,70 +108,40 @@ static int dstune_thread(void *data)
 	return 0;
 }
 
-static int dstune_kthread_init(struct dstune_priv *dsp)
-{
-	struct task_struct *thread;
-	int ret = 0;
-
-	thread = !dsp->perf_critical ? kthread_run(dstune_thread, dsp, dsp->name) :
-				kthread_run_perf_critical(dstune_thread, dsp, dsp->name);
-	if (IS_ERR(thread)) {
-		ret = PTR_ERR(thread);
-		pr_err("Failed to start stune thread, err: %d\n", ret);
-	}
-
-	return ret;
-}
-
-static int dstune_struct_init(enum dstune_struct ds_num)
-{
-	struct dstune_priv *dsp = &dss_priv[ds_num];
-	struct dstune ds = {
-		.waitq = __WAIT_QUEUE_HEAD_INITIALIZER(dss[ds_num].waitq),
-		.update = ATOMIC_INIT(0)
-	};
-
-	dss[ds_num] = ds;
-	dsp->ds = &dss[ds_num];
-
-	switch (ds_num) {
-		case FB:
-			strcpy(dsp->name, "dstune_fb");
-			dsp->set_func = &set_fb;
-			dsp->perf_critical = true;
-			dsp->duration =
-				msecs_to_jiffies(CONFIG_FB_STUNE_DURATION);
-			break;
-		case TOPCG:
-			strcpy(dsp->name, "dstune_topcg");
-			dsp->set_func = &set_topcg;
-			dsp->perf_critical = false;
-			dsp->duration =
-				msecs_to_jiffies(CONFIG_TOPCG_STUNE_DURATION);
-			break;
-		case INPUT:
-			strcpy(dsp->name, "dstune_input");
-			dsp->set_func = &set_input;
-			dsp->perf_critical = false;
-			dsp->duration =
-				msecs_to_jiffies(CONFIG_INPUT_STUNE_DURATION);
-			break;
-		default:
-			break;
-	}
-
-	return dstune_kthread_init(dsp);
-}
-
 static int __init dynamic_stune_init(void)
 {
+	struct task_struct *thread;
 	enum dstune_struct i;
 	int ret = 0;
 
+	static struct dstune_init ds_init[] = {
+		{ "dstune_fb", CONFIG_FB_STUNE_DURATION, &set_fb },
+		{ "dstune_topcg", CONFIG_TOPCG_STUNE_DURATION, &set_topcg },
+		{ "dstune_input", CONFIG_INPUT_STUNE_DURATION, &set_input }
+	};
+
 	for (i = 0; i < DT_MAX; i++) {
-		ret = dstune_struct_init(i);
-		if (ret)
+		struct dstune *ds = &dss[i];
+		struct dstune_priv *dsp = &dss_priv[i];
+		struct dstune_init dsi = ds_init[i];
+
+		struct dstune ds_init = {
+			.waitq = __WAIT_QUEUE_HEAD_INITIALIZER(ds->waitq),
+			.update = ATOMIC_INIT(0)
+		};
+
+		*ds = ds_init;
+
+		dsp->ds = ds;
+		dsp->duration = msecs_to_jiffies(dsi.duration);
+		dsp->set_func = dsi.setaddr;
+
+		thread = kthread_run(dstune_thread, dsp, dsi.name);
+		if (IS_ERR(thread)) {
+			ret = PTR_ERR(thread);
+			pr_err("Failed to start stune thread, err: %d\n", ret);
 			break;
+		}
 	}
 
 	return ret;
