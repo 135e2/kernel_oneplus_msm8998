@@ -15,6 +15,10 @@
 bool schedtune_initialized = false;
 #endif
 
+#ifdef CONFIG_DYNAMIC_STUNE 
+#include <linux/dynamic_stune.h>
+#endif
+
 unsigned int sysctl_sched_cfs_boost __read_mostly;
 
 extern struct reciprocal_value schedtune_spc_rdiv;
@@ -142,6 +146,23 @@ struct schedtune {
 	/* Task will be scheduled on the CPU with the highest spare capacity */
 	int crucial;
 };
+
+#ifdef CONFIG_DYNAMIC_STUNE 
+struct dstune_priv {
+	struct dstune *ds;
+	unsigned long duration;
+	void (*set_func)(bool state);
+};
+
+struct dstune_init {
+	char *name;
+	unsigned long duration;
+	void *setaddr;
+};
+
+static struct dstune_priv dss_priv[DT_MAX];
+struct dstune dss[DT_MAX];
+#endif /* CONFIG_DYNAMIC_STUNE */
 
 static inline struct schedtune *css_st(struct cgroup_subsys_state *css)
 {
@@ -1035,50 +1056,140 @@ static struct schedtune *stune_get_by_name(char *st_name)
 	return NULL;
 }
 
-int do_boost(char *st_name, bool enable)
+/*
+ * Framebuffer function
+ */
+static void set_fb(bool state)
 {
-	struct schedtune *st = stune_get_by_name(st_name);
-	s64 boost;
+	struct schedtune *st;
 
-	if (!st)
-		return -EINVAL;
+	/*
+	 * Enable boost and prefer_idle in order to bias migrating top-app
+	 * tasks to idle big cluster cores. Also enable bias for foreground
+	 * to help with jitter reduction.
+	 */
+	st = stune_get_by_name("top-app");
+	if (!unlikely(st))
+		return;
 
-	boost = enable ? st->dynamic_boost : 0;
+	boost_write(&st->css, NULL, state ? st->dynamic_boost : 0);
+	prefer_idle_write(&st->css, NULL, state);
 
-	if (boost == st->boost)
-		return 0;
+	st = stune_get_by_name("foreground");
+	if (!unlikely(st))
+		return;
 
-	return boost_write(&st->css, NULL, boost);
+	boost_bias_write(&st->css, NULL, state);
 }
 
-int do_boost_bias(char *st_name, u64 boost_bias)
+/*
+ * Top-app cgroup function
+ */
+static void set_topcg(bool state)
 {
-	struct schedtune *st = stune_get_by_name(st_name);
+	struct schedtune *st = stune_get_by_name("top-app");
 
-	if (!st)
-		return -EINVAL;
+	if (!unlikely(st))
+		return;
 
-	return boost_bias_write(&st->css, NULL, boost_bias);
+	/*
+	 * Use idle cpus with the highest original capacity for top-app when it
+	 * comes to app launches and transitions in order to speed up
+	 * the process and efficiently consume power.
+	 */
+	crucial_write(&st->css, NULL, state);
 }
 
-int do_prefer_idle(char *st_name, u64 prefer_idle)
+/*
+ * Input function
+ */
+atomic_t input_lock = ATOMIC_INIT(0);
+
+static void set_input(bool state)
 {
-	struct schedtune *st = stune_get_by_name(st_name);
-
-	if (!st)
-		return -EINVAL;
-
-	return prefer_idle_write(&st->css, NULL, prefer_idle);
+	/* Set lock to be checked by fb structure */
+	atomic_set(&input_lock, state);
 }
 
-int do_crucial(char *st_name, u64 crucial)
+static int dstune_thread(void *data)
 {
-	struct schedtune *st = stune_get_by_name(st_name);
+	static const struct sched_param sched_max_rt_prio = {
+		.sched_priority = MAX_RT_PRIO - 1
+	};
+	struct dstune_priv *dsp = data;
 
-	if (!st)
-		return -EINVAL;
+	sched_setscheduler_nocheck(current, SCHED_FIFO, &sched_max_rt_prio);
 
-	return crucial_write(&st->css, NULL, crucial);
+	while (1) {
+		bool should_stop = false;
+
+		atomic_set_release(&dsp->ds->update, 0);
+
+		wait_event(dsp->ds->waitq,
+			atomic_read(&dsp->ds->update) ||
+			(should_stop = kthread_should_stop()));
+
+		if (should_stop)
+			break;
+
+		dsp->set_func(true);
+
+		while (1) {
+			unsigned long time = dsp->duration;
+
+			atomic_set_release(&dsp->ds->update, 0);
+
+			time = wait_event_timeout(dsp->ds->waitq,
+						atomic_read(&dsp->ds->update) ||
+						(should_stop = kthread_should_stop()), time);
+
+			if (should_stop || !time)
+				break;
+		}
+
+		dsp->set_func(false);
+	}
+
+	return 0;
+}
+
+static int __init dynamic_stune_init(void)
+{
+	struct task_struct *thread;
+	enum dstune_struct i;
+	int ret = 0;
+
+	static struct dstune_init ds_init[] = {
+		{ "dstune_fb", CONFIG_FB_STUNE_DURATION, &set_fb },
+		{ "dstune_topcg", CONFIG_TOPCG_STUNE_DURATION, &set_topcg },
+		{ "dstune_input", CONFIG_INPUT_STUNE_DURATION, &set_input }
+	};
+
+	for (i = 0; i < DT_MAX; i++) {
+		struct dstune *ds = &dss[i];
+		struct dstune_priv *dsp = &dss_priv[i];
+		struct dstune_init dsi = ds_init[i];
+
+		struct dstune ds_init = {
+			.waitq = __WAIT_QUEUE_HEAD_INITIALIZER(ds->waitq),
+			.update = ATOMIC_INIT(1)
+		};
+
+		*ds = ds_init;
+
+		dsp->ds = ds;
+		dsp->duration = msecs_to_jiffies(dsi.duration);
+		dsp->set_func = dsi.setaddr;
+
+		thread = kthread_run_perf_critical(dstune_thread, dsp, dsi.name);
+		if (IS_ERR(thread)) {
+			ret = PTR_ERR(thread);
+			pr_err("Failed to start stune thread, err: %d\n", ret);
+			break;
+		}
+	}
+
+	return ret;
 }
 #endif /* CONFIG_DYNAMIC_STUNE */
 
@@ -1285,6 +1396,10 @@ schedtune_init(void)
 #endif
 
 	schedtune_spc_rdiv = reciprocal_value(100);
+
+#ifdef CONFIG_DYNAMIC_STUNE
+	dynamic_stune_init();
+#endif
 
 	return 0;
 
