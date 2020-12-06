@@ -1063,7 +1063,9 @@ static struct schedtune *stune_get_by_name(char *st_name)
 static void set_fb(bool state)
 {
 	struct schedtune *st = stune_get_by_name("top-app");
+	unsigned long sugov_flags = SUGOV_LIMIT;
 	s64 boost;
+	int cpu;
 
 	if (!unlikely(st))
 		return;
@@ -1076,6 +1078,26 @@ static void set_fb(bool state)
 	boost = state ? st->dynamic_boost : 0;
 	if (boost != st->boost)
 		boost_write(&st->css, NULL, boost);
+
+	/* Set active limits if state is true */
+	if (state)
+		sugov_flags |= SUGOV_LIMIT_ACTIVE;
+
+	rcu_read_lock_sched();
+	for_each_possible_cpu(cpu) {
+		struct rq *rq = cpu_rq(cpu);
+		unsigned long flags;
+
+		/* 
+		 * Recalculate the governor's frequency for each cpu
+		 * to update utilization and put real/swapped limits per
+		 * cpu policy.
+		 */
+		raw_spin_lock_irqsave(&rq->lock, flags);
+		cpufreq_update_util(rq, sugov_flags);
+		raw_spin_unlock_irqrestore(&rq->lock, flags);
+	}
+	rcu_read_unlock_sched();
 }
 
 /*
