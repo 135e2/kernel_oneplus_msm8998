@@ -770,7 +770,7 @@ dynamic_boost_write(struct cgroup_subsys_state *css, struct cftype *cft,
 	st->dynamic_boost = dynamic_boost;
 
 	/* Update boost */
-	if (st->boost != 0 && st->boost != dynamic_boost)
+	if (dynamic_boost != st->boost)
 		boost_write(css, cft, dynamic_boost);
 
 	return 0;
@@ -813,7 +813,8 @@ static int boost_bias_write_wrapper(struct cgroup_subsys_state *css,
 		return 0;
 
 #ifdef CONFIG_DYNAMIC_STUNE
-	if (!strcmp(css->cgroup->kn->name, "foreground"))
+	if (!strcmp(css->cgroup->kn->name, "top-app") ||
+		!strcmp(css->cgroup->kn->name, "foreground"))
 		return 0;
 #endif /* CONFIG_DYNAMIC_STUNE */
 
@@ -1061,25 +1062,20 @@ static struct schedtune *stune_get_by_name(char *st_name)
  */
 static void set_fb(bool state)
 {
-	struct schedtune *st;
+	struct schedtune *st = stune_get_by_name("top-app");
+	s64 boost;
+
+	if (!unlikely(st))
+		return;
 
 	/*
-	 * Enable boost and prefer_idle in order to bias migrating top-app
-	 * tasks to idle big cluster cores. Also enable bias for foreground
-	 * to help with jitter reduction.
+	 * Enable boost to make sugov prefer higher freqs. It is
+	 * ideal that we have it here so that we avoid prefering
+	 * higher freqs when framebuffer is not commiting.
 	 */
-	st = stune_get_by_name("top-app");
-	if (!unlikely(st))
-		return;
-
-	boost_write(&st->css, NULL, state ? st->dynamic_boost : 0);
-	prefer_idle_write(&st->css, NULL, state);
-
-	st = stune_get_by_name("foreground");
-	if (!unlikely(st))
-		return;
-
-	boost_bias_write(&st->css, NULL, state);
+	boost = state ? st->dynamic_boost : 0;
+	if (boost != st->boost)
+		boost_write(&st->css, NULL, boost);
 }
 
 /*
@@ -1107,8 +1103,28 @@ atomic_t input_lock = ATOMIC_INIT(0);
 
 static void set_input(bool state)
 {
+	struct schedtune *st;
+
 	/* Set lock to be checked by fb structure */
 	atomic_set(&input_lock, state);
+
+	/*
+	 * Enable bias and prefer_idle in order to bias migrating top-app
+	 * tasks to idle big cluster cores. Also enable bias for foreground
+	 * to help with jitter reduction.
+	 */
+	st = stune_get_by_name("top-app");
+	if (!unlikely(st))
+		return;
+
+	boost_bias_write(&st->css, NULL, state);
+	prefer_idle_write(&st->css, NULL, state);
+
+	st = stune_get_by_name("foreground");
+	if (!unlikely(st))
+		return;
+
+	boost_bias_write(&st->css, NULL, state);
 }
 
 static int dstune_thread(void *data)
