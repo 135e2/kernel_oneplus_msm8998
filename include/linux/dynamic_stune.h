@@ -18,18 +18,13 @@ enum dstune_struct {
 
 struct dstune {
 	wait_queue_head_t waitq;
-	atomic_t update;
+	atomic_t update, state;
 };
 
 extern struct dstune dss[];
-extern atomic_t input_lock;
 
-static __always_inline void dynstune_trigger(enum dstune_struct ds_num)
-{
-	struct dstune *ds = &dss[ds_num];
-
-	if (!atomic_cmpxchg_acquire(&ds->update, 0, 1))
-		wake_up(&ds->waitq);
-}
-
+#define dynstune_read_state(_dsnum) atomic_read(&dss[_dsnum].state)
+#define dynstune_acquire_update(_dsnum) \
+			atomic_cmpxchg_acquire(&dss[_dsnum].update, 0, 1)
+#define dynstune_wake(_dsnum) wake_up(&dss[_dsnum].waitq)
 #endif /* _DYNAMIC_STUNE_H_ */
