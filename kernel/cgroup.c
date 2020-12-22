@@ -2763,8 +2763,8 @@ static ssize_t __cgroup_procs_write(struct kernfs_open_file *of, char *buf,
 
 #ifdef CONFIG_DYNAMIC_STUNE
 	if (!ret && !threadgroup && !strcmp(of->kn->parent->name, "top-app") && 
-		task_is_zygote(tsk->parent))
-		dynstune_trigger(TOPCG);
+		task_is_zygote(tsk->parent) && dynstune_acquire_update(TOPCG))
+		dynstune_wake(TOPCG);
 #endif /* CONFIG_DYNAMIC_STUNE */
 
 	put_task_struct(tsk);

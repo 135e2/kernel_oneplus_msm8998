@@ -17,6 +17,12 @@ bool schedtune_initialized = false;
 
 #ifdef CONFIG_DYNAMIC_STUNE 
 #include <linux/dynamic_stune.h>
+
+#define dynstune_read_update(_dsnum) atomic_read(&dss[_dsnum].update)
+#define dynstune_set_state(_dsnum, _val) \
+			(atomic_cmpxchg(&dss[_dsnum].state, !_val, _val) != _val)
+
+#define dynstune_waited(_dsnum, _time) (dss_priv[_dsnum].duration != _time)
 #endif
 
 unsigned int sysctl_sched_cfs_boost __read_mostly;
@@ -149,15 +155,10 @@ struct schedtune {
 
 #ifdef CONFIG_DYNAMIC_STUNE 
 struct dstune_priv {
+	char *name;
 	struct dstune *ds;
 	unsigned long duration;
-	void (*set_func)(bool state);
-};
-
-struct dstune_init {
-	char *name;
-	unsigned long duration;
-	void *setaddr;
+	void (*set_func)(u64 time);
 };
 
 static struct dstune_priv dss_priv[DT_MAX];
@@ -1050,7 +1051,7 @@ static struct schedtune *stune_get_by_name(char *st_name)
 		}
 
 		cgroup_name(st->css.cgroup, name_buf, sizeof(name_buf));
-		if (strncmp(name_buf, st_name, strlen(st_name)) == 0)
+		if (!strncmp(name_buf, st_name, strlen(st_name)))
 			return st;
 	}
 
@@ -1060,13 +1061,24 @@ static struct schedtune *stune_get_by_name(char *st_name)
 /*
  * Framebuffer function
  */
-static void set_fb(bool state)
+static void set_fb(u64 time)
 {
-	struct schedtune *st = stune_get_by_name("top-app");
+	struct schedtune *st;
 	unsigned long sugov_flags = SUGOV_LIMIT;
-	s64 boost;
+	bool state = !!time;
+	s64 boost = 0;
 	int cpu;
 
+	if (!dynstune_set_state(FB, state)) {
+		/* Cool down if the structure did not wait */
+		if (likely(state) && !dynstune_waited(FB, time)) {
+			while (time)
+				time = schedule_timeout_uninterruptible(time);
+		}
+		return;
+	}
+
+	st = stune_get_by_name("top-app");
 	if (!unlikely(st))
 		return;
 
@@ -1075,38 +1087,51 @@ static void set_fb(bool state)
 	 * ideal that we have it here so that we avoid prefering
 	 * higher freqs when framebuffer is not commiting.
 	 */
-	boost = state ? st->dynamic_boost : 0;
+	if (state) {
+		boost = st->dynamic_boost;
+
+		/* Set active limits if state is true */
+		sugov_flags |= SUGOV_LIMIT_ACTIVE;
+	}
+
 	if (boost != st->boost)
 		boost_write(&st->css, NULL, boost);
 
-	/* Set active limits if state is true */
-	if (state)
-		sugov_flags |= SUGOV_LIMIT_ACTIVE;
-
-	rcu_read_lock_sched();
 	for_each_possible_cpu(cpu) {
 		struct rq *rq = cpu_rq(cpu);
-		unsigned long flags;
+		struct rq_flags rf;
 
-		/* 
+		raw_spin_lock_irqsave(&rq->lock, rf.flags);
+
+		/*
 		 * Recalculate the governor's frequency for each cpu
-		 * to update utilization and put real/swapped limits per
+		 * to update utilization and put active/pwrsave limits per
 		 * cpu policy.
 		 */
-		raw_spin_lock_irqsave(&rq->lock, flags);
+		rcu_read_lock_sched();
 		cpufreq_update_util(rq, sugov_flags);
-		raw_spin_unlock_irqrestore(&rq->lock, flags);
+		rcu_read_unlock_sched();
+
+		raw_spin_unlock_irqrestore(&rq->lock, rf.flags);
 	}
-	rcu_read_unlock_sched();
 }
 
 /*
  * Top-app cgroup function
  */
-static void set_topcg(bool state)
+static void set_topcg(u64 time)
 {
-	struct schedtune *st = stune_get_by_name("top-app");
+	struct schedtune *st;
+	bool state = !!time;
 
+	/* Consider topcg requests as input */
+	if (state && dynstune_acquire_update(INPUT))
+		dynstune_wake(INPUT);
+
+	if (!dynstune_set_state(TOPCG, state))
+		return;
+
+	st = stune_get_by_name("top-app");
 	if (!unlikely(st))
 		return;
 
@@ -1121,32 +1146,41 @@ static void set_topcg(bool state)
 /*
  * Input function
  */
-atomic_t input_lock = ATOMIC_INIT(0);
-
-static void set_input(bool state)
+static void set_input(u64 time)
 {
-	struct schedtune *st;
+	struct schedtune *top_st, *fore_st;
+	bool state = !!time;
 
-	/* Set lock to be checked by fb structure */
-	atomic_set(&input_lock, state);
+	if (!dynstune_set_state(INPUT, state)) {
+		/* 
+		 * Wake framebuffer structure if it's allowed and 
+		 * it's under infinite timeout.
+		 */
+		if (likely(state) && !dynstune_read_state(FB) && 
+			dynstune_read_update(FB))
+			dynstune_wake(FB);
+		return;
+	}
+
+	/* Wake framebuffer dstune if initially woken up */
+	if (state) {
+		dynstune_acquire_update(FB);
+		dynstune_wake(FB);
+	}
+
+	top_st = stune_get_by_name("top-app");
+	fore_st = stune_get_by_name("foreground");
+	if (unlikely(!top_st || !fore_st))
+		return;
 
 	/*
 	 * Enable bias and prefer_idle in order to bias migrating top-app
 	 * tasks to idle big cluster cores. Also enable bias for foreground
 	 * to help with jitter reduction.
 	 */
-	st = stune_get_by_name("top-app");
-	if (!unlikely(st))
-		return;
-
-	boost_bias_write(&st->css, NULL, state);
-	prefer_idle_write(&st->css, NULL, state);
-
-	st = stune_get_by_name("foreground");
-	if (!unlikely(st))
-		return;
-
-	boost_bias_write(&st->css, NULL, state);
+	boost_bias_write(&top_st->css, NULL, state);
+	prefer_idle_write(&top_st->css, NULL, state);
+	boost_bias_write(&fore_st->css, NULL, state);
 }
 
 static int dstune_thread(void *data)
@@ -1155,37 +1189,22 @@ static int dstune_thread(void *data)
 		.sched_priority = MAX_RT_PRIO - 1
 	};
 	struct dstune_priv *dsp = data;
+	struct dstune *ds = dsp->ds;
+	bool should_stop = false;
 
 	sched_setscheduler_nocheck(current, SCHED_FIFO, &sched_max_rt_prio);
 
 	while (1) {
-		bool should_stop = false;
+		atomic_set_release(&ds->update, 0);
 
-		atomic_set_release(&dsp->ds->update, 0);
+		dsp->set_func(
+			wait_event_timeout(ds->waitq, atomic_read(&ds->update) ||
+				unlikely(should_stop = kthread_should_stop()), (!atomic_read(&ds->state) ?
+				MAX_SCHEDULE_TIMEOUT : dsp->duration))
+		);
 
-		wait_event(dsp->ds->waitq,
-			atomic_read(&dsp->ds->update) ||
-			(should_stop = kthread_should_stop()));
-
-		if (should_stop)
+		if (unlikely(should_stop))
 			break;
-
-		dsp->set_func(true);
-
-		while (1) {
-			unsigned long time = dsp->duration;
-
-			atomic_set_release(&dsp->ds->update, 0);
-
-			time = wait_event_timeout(dsp->ds->waitq,
-						atomic_read(&dsp->ds->update) ||
-						(should_stop = kthread_should_stop()), time);
-
-			if (should_stop || !time)
-				break;
-		}
-
-		dsp->set_func(false);
 	}
 
 	return 0;
@@ -1197,29 +1216,28 @@ static int __init dynamic_stune_init(void)
 	enum dstune_struct i;
 	int ret = 0;
 
-	static struct dstune_init ds_init[] = {
-		{ "dstune_fb", CONFIG_FB_STUNE_DURATION, &set_fb },
-		{ "dstune_topcg", CONFIG_TOPCG_STUNE_DURATION, &set_topcg },
-		{ "dstune_input", CONFIG_INPUT_STUNE_DURATION, &set_input }
+	static struct dstune_priv dsp_init[] = {
+		{ "dstune_fb", NULL, CONFIG_FB_STUNE_DURATION, &set_fb },
+		{ "dstune_topcg", NULL, CONFIG_TOPCG_STUNE_DURATION, &set_topcg },
+		{ "dstune_input", NULL, CONFIG_INPUT_STUNE_DURATION, &set_input }
 	};
 
 	for (i = 0; i < DT_MAX; i++) {
 		struct dstune *ds = &dss[i];
 		struct dstune_priv *dsp = &dss_priv[i];
-		struct dstune_init dsi = ds_init[i];
 
 		struct dstune ds_init = {
 			.waitq = __WAIT_QUEUE_HEAD_INITIALIZER(ds->waitq),
-			.update = ATOMIC_INIT(1)
+			.update = ATOMIC_INIT(1), .state = ATOMIC_INIT(0)
 		};
 
 		*ds = ds_init;
+		*dsp = dsp_init[i];
 
 		dsp->ds = ds;
-		dsp->duration = msecs_to_jiffies(dsi.duration);
-		dsp->set_func = dsi.setaddr;
+		dsp->duration = msecs_to_jiffies(dsp->duration);
 
-		thread = kthread_run_perf_critical(dstune_thread, dsp, dsi.name);
+		thread = kthread_run_perf_critical(dstune_thread, dsp, dsp->name);
 		if (IS_ERR(thread)) {
 			ret = PTR_ERR(thread);
 			pr_err("Failed to start stune thread, err: %d\n", ret);
