@@ -6992,11 +6992,11 @@ static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 				continue;
 
 			/*
-			* Skip other calculations if the task is crucial. If the
-			* crucial_cpu has been established then skip other cpus unless
-			* if a cpu with higher capacity is found in which that cpu will
-			* get tracked instead.
-			*/
+			 * Skip other calculations if the task is crucial. If the
+			 * crucial_cpu has been established then skip other cpus unless
+			 * if a cpu with higher capacity is found in which that cpu will
+			 * get tracked instead.
+			 */
 			if (crucial) {
 
 				/* Skip last crucial cpu */
@@ -7007,15 +7007,14 @@ static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 				if (idle_cpu(i)) {
 
 					/*
-					* Skip idle cpus with less than or equal to established crucial max
-					* capacity.
-					*/
+					 * Skip idle cpus with less than or equal to established crucial max
+					 * capacity.
+					 */
 					if (capacity_orig <= crucial_max_cap)
 						continue;
 
 					crucial_max_cap = capacity_orig;
 					crucial_cpu = i;
-					last_crucial_cpu = i;
 					continue;
 				}
 				if (crucial_cpu != -1)
@@ -7255,13 +7254,19 @@ static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 
 	} while (sg = sg->next, sg != sd->groups);
 
-	/* If a compatible crucial CPU was found, use it and skip the backup path */
-	if (crucial && (crucial_cpu != -1)) {
-		trace_sched_find_best_target(p, prefer_idle, min_util, cpu,
-					best_idle_cpu, best_active_cpu,
-					crucial_cpu);
+	if (crucial) {
+		/* If a compatible crucial CPU was found, use it and skip the backup path */
+		if (crucial_cpu != -1) {
+			trace_sched_find_best_target(p, prefer_idle, min_util, cpu,
+						best_idle_cpu, best_active_cpu,
+						crucial_cpu);
 
-		return crucial_cpu;
+			last_crucial_cpu = crucial_cpu;
+			return crucial_cpu;
+		}
+
+		/* Reset last_crucial_cpu if there was no crucial_cpu found */
+		last_crucial_cpu = -1;
 	}
 
 	/*
