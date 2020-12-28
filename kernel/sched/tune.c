@@ -1119,16 +1119,16 @@ static void set_fb(u64 time)
 /*
  * Top-app cgroup function
  */
-static void set_topcg(u64 time)
+static void set_fork(u64 time)
 {
 	struct schedtune *st;
 	bool state = !!time;
 
-	/* Consider topcg requests as input */
+	/* Consider fork requests as input */
 	if (state && dynstune_acquire_update(INPUT))
 		dynstune_wake(INPUT);
 
-	if (!dynstune_set_state(TOPCG, state))
+	if (!dynstune_set_state(FORK, state))
 		return;
 
 	st = stune_get_by_name("top-app");
@@ -1218,7 +1218,7 @@ static int __init dynamic_stune_init(void)
 
 	static struct dstune_priv dsp_init[] = {
 		{ "dstune_fb", NULL, CONFIG_FB_STUNE_DURATION, &set_fb },
-		{ "dstune_topcg", NULL, CONFIG_TOPCG_STUNE_DURATION, &set_topcg },
+		{ "dstune_fork", NULL, CONFIG_FORK_STUNE_DURATION, &set_fork },
 		{ "dstune_input", NULL, CONFIG_INPUT_STUNE_DURATION, &set_input }
 	};
 
