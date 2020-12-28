@@ -496,6 +496,23 @@ static inline struct cgroup *task_cgroup(struct task_struct *task,
 	return task_css(task, subsys_id)->cgroup;
 }
 
+#ifdef CONFIG_CGROUP_SCHEDTUNE
+/**
+ * task_belongs_to_st - test whether a task belongs to a certain schedtune cgroup by name
+ * @task: the target task
+ * @st_name: the target schedtune cgroup name
+ *
+ * Test whether @task belongs to a schedtune cgroup named @st_name.
+ */
+static inline bool task_belongs_to_st(struct task_struct *task, char *st_name)
+{
+	return !strcmp(task_cgroup(task, schedtune_cgrp_id)->kn->name, st_name);
+}
+#else
+static inline bool task_belongs_to_st(struct task_struct *task, char *st_name)
+{ return false; }
+#endif
+
 /**
  * cgroup_is_descendant - test ancestry
  * @cgrp: the cgroup to be tested
