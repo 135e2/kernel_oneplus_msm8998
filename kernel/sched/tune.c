@@ -814,8 +814,7 @@ static int boost_bias_write_wrapper(struct cgroup_subsys_state *css,
 		return 0;
 
 #ifdef CONFIG_DYNAMIC_STUNE
-	if (!strcmp(css->cgroup->kn->name, "top-app") ||
-		!strcmp(css->cgroup->kn->name, "foreground"))
+	if (!strcmp(css->cgroup->kn->name, "foreground"))
 		return 0;
 #endif /* CONFIG_DYNAMIC_STUNE */
 
@@ -1045,16 +1044,15 @@ static struct schedtune *stune_get_by_name(char *st_name)
 		char name_buf[NAME_MAX + 1];
 		struct schedtune *st = allocated_group[idx];
 
-		if (!st) {
-			pr_warn("schedtune: could not find %s\n", st_name);
+		if (unlikely(!st))
 			break;
-		}
 
 		cgroup_name(st->css.cgroup, name_buf, sizeof(name_buf));
 		if (!strncmp(name_buf, st_name, strlen(st_name)))
 			return st;
 	}
 
+	pr_warn("schedtune: could not find %s\n", st_name);
 	return NULL;
 }
 
@@ -1082,11 +1080,6 @@ static void set_fb(u64 time)
 	if (unlikely(!st))
 		return;
 
-	/*
-	 * Enable boost to make sugov prefer higher freqs. It is
-	 * ideal that we have it here so that we avoid prefering
-	 * higher freqs when framebuffer is not commiting.
-	 */
 	if (state) {
 		boost = st->dynamic_boost;
 
@@ -1094,8 +1087,25 @@ static void set_fb(u64 time)
 		sugov_flags |= SUGOV_LIMIT_ACTIVE;
 	}
 
+	/*
+	 * Enable boost to make sugov prefer higher freqs and encourage
+	 * scheduler to move top-app tasks to big cluster.
+	 */
 	if (boost != st->boost)
 		boost_write(&st->css, NULL, boost);
+
+	/*
+	 * Enable prefer_idle in order to bias migrating top-app
+	 * tasks to idle cores. Also enable bias for foreground
+	 * to help with jitter reduction.
+	 */
+	prefer_idle_write(&st->css, NULL, state);
+
+	st = stune_get_by_name("foreground");
+	if (unlikely(!st))
+		return;
+
+	boost_bias_write(&st->css, NULL, state);
 
 	for_each_possible_cpu(cpu) {
 		struct rq *rq = cpu_rq(cpu);
@@ -1148,7 +1158,6 @@ static void set_fork(u64 time)
  */
 static void set_input(u64 time)
 {
-	struct schedtune *top_st, *fore_st;
 	bool state = !!time;
 
 	if (!dynstune_set_state(INPUT, state)) {
@@ -1167,20 +1176,6 @@ static void set_input(u64 time)
 		dynstune_acquire_update(FB);
 		dynstune_wake(FB);
 	}
-
-	top_st = stune_get_by_name("top-app");
-	fore_st = stune_get_by_name("foreground");
-	if (unlikely(!top_st || !fore_st))
-		return;
-
-	/*
-	 * Enable bias and prefer_idle in order to bias migrating top-app
-	 * tasks to idle big cluster cores. Also enable bias for foreground
-	 * to help with jitter reduction.
-	 */
-	boost_bias_write(&top_st->css, NULL, state);
-	prefer_idle_write(&top_st->css, NULL, state);
-	boost_bias_write(&fore_st->css, NULL, state);
 }
 
 static int dstune_thread(void *data)
@@ -1210,7 +1205,7 @@ static int dstune_thread(void *data)
 	return 0;
 }
 
-static int __init dynamic_stune_init(void)
+static int dynamic_stune_init(void)
 {
 	struct task_struct *thread;
 	enum dstune_struct i;
