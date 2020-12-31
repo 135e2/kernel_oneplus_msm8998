@@ -510,7 +510,7 @@ static inline bool task_belongs_to_st(struct task_struct *task, char *st_name)
 }
 #else
 static inline bool task_belongs_to_st(struct task_struct *task, char *st_name)
-{ return false; }
+{ return true; }
 #endif
 
 /**
