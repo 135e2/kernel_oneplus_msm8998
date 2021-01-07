@@ -6119,7 +6119,7 @@ static inline bool task_fits_cap(struct task_struct *p, int cpu)
 	int min_cpu = cpu_rq(cpu)->rd->min_cap_orig_cpu;
 
 	/* Do not allow iowait tasks to occupy perf cluster */
-	if (p->in_iowait && cpumask_test_cpu(cpu, cpu_perf_mask))
+	if (unlikely(p->in_iowait) && cpumask_test_cpu(cpu, cpu_perf_mask))
 		return false;
 
 	if (capacity == max_capacity)
@@ -6904,7 +6904,7 @@ static int start_cpu(bool boosted)
 /*
  * Store last crucial cpu to avoid overscheduling on a target.
  */
-static int last_crucial_cpu = -1;
+static atomic_t last_crucial_cpu = ATOMIC_INIT(-1);
 
 static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 				   bool boosted, bool prefer_idle, bool crucial)
@@ -6984,7 +6984,7 @@ static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 			if (crucial) {
 
 				/* Skip last crucial cpu */
-				if (last_crucial_cpu == i)
+				if (atomic_read(&last_crucial_cpu) == i)
 					continue;
 
 				/* Only allow idle_cpus to be tracked, skip if not. */
@@ -7245,12 +7245,12 @@ static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 						best_idle_cpu, best_active_cpu,
 						crucial_cpu);
 
-			last_crucial_cpu = crucial_cpu;
+			atomic_set(&last_crucial_cpu, crucial_cpu);
 			return crucial_cpu;
 		}
 
 		/* Reset last_crucial_cpu if there was no crucial_cpu found */
-		last_crucial_cpu = -1;
+		atomic_set(&last_crucial_cpu, -1);
 	}
 
 	/*

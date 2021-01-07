@@ -1392,14 +1392,6 @@ config FB_STUNE_DURATION
 	  Determines how long defined schedtune parameters are turned on after a 
 	  framebuffer update.
 
-config FORK_STUNE_DURATION
-	int "Dynamic schedtune duration for top-app st cgroup fork event in milliseconds"
-	range 10 10000
-	default 1500
-	help
-	  Determines how long defined schedtune parameters are turned on after 
-	  top-app zygote forks.
-
 config INPUT_STUNE_DURATION
 	int "Dynamic schedtune duration for input event in milliseconds"
 	range 10 10000
