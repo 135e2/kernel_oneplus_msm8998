@@ -11,7 +11,6 @@
 
 enum dstune_struct {
 	FB,
-	FORK,
 	INPUT,
 	DT_MAX
 };
