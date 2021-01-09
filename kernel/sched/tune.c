@@ -1117,6 +1117,12 @@ static void set_fb(u64 time)
 	if (boost != st->boost)
 		boost_write(&st->css, NULL, boost);
 
+	/* 
+	 * Enable bias to retain fair conditions for top-app tasks for cases 
+	 * that the dynamic boost is set to 0.
+	 */
+	boost_bias_write(&st->css, NULL, state);
+
 	/*
 	 * Enable prefer_idle in order to bias migrating top-app tasks
 	 * to idle cores along with boost bias to favor high capacity cpus.
