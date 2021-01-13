@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * Dynamic Schedtune Driver
- * Copyright (C) 2020 Edrick Vince Sinsuan <sedrickvince@gmail.com>.
+ * Copyright (C) 2021 Edrick Vince Sinsuan <sedrickvince@gmail.com>.
  */
 
 #ifndef _DYNAMIC_STUNE_H_

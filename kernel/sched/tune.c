@@ -1100,52 +1100,58 @@ static void set_fb(u64 time)
 	}
 
 	st = stune_get_by_name("top-app");
-	if (unlikely(!st))
-		return;
+	if (likely(st)) {
+		/*
+		 * Enable boost to make sugov prefer higher freqs and encourage
+		 * scheduler to move top-app tasks to big cluster.
+		 */
+		if (state)
+			boost = st->dynamic_boost;
 
-	if (state) {
-		boost = st->dynamic_boost;
+		if (boost != st->boost)
+			boost_write(&st->css, NULL, boost);
 
-		/* Set active limits if state is true */
-		sugov_flags |= SUGOV_LIMIT_ACTIVE;
+		/* 
+		 * Enable bias to retain fair conditions for top-app tasks for cases 
+		 * that the dynamic boost is set to 0.
+		 */
+		boost_bias_write(&st->css, NULL, state);
+
+		/*
+		 * Enable prefer_idle in order to bias migrating top-app tasks
+		 * to idle cores along with boost bias to favor high capacity cpus.
+		 */
+		prefer_idle_write(&st->css, NULL, state);
+
+		/*
+		 * Enable crucial in order to bias migrating top-app zygote tasks 
+		 * to the highest orig capacity idle cpu at the time of the task's 
+		 * CPU selection.
+		 */
+		crucial_write(&st->css, NULL, state);
 	}
 
-	/*
-	 * Enable boost to make sugov prefer higher freqs and encourage
-	 * scheduler to move top-app tasks to big cluster.
-	 */
-	if (boost != st->boost)
-		boost_write(&st->css, NULL, boost);
-
-	/* 
-	 * Enable bias to retain fair conditions for top-app tasks for cases 
-	 * that the dynamic boost is set to 0.
-	 */
-	boost_bias_write(&st->css, NULL, state);
-
-	/*
-	 * Enable prefer_idle in order to bias migrating top-app tasks
-	 * to idle cores along with boost bias to favor high capacity cpus.
-	 */
-	prefer_idle_write(&st->css, NULL, state);
-
-	/*
-	 * Enable crucial in order to bias migrating top-app zygote tasks 
-	 * to the highest orig capacity idle cpu at the time of the task's 
-	 * CPU selection.
-	 */
-	crucial_write(&st->css, NULL, state);
-
 	st = stune_get_by_name("foreground");
-	if (unlikely(!st))
-		return;
+	if (likely(st)) {
+		/*
+		 * Enable bias for foreground to also encourage fg task migration 
+		 * to big cluster without artificially increasing utilization of
+		 * tasks within the cgroup.
+		 */
+		boost_bias_write(&st->css, NULL, state);
 
-	/*
-	 * Enable bias for foreground to also encourage fg task migration 
-	 * to big cluster without artificially increasing utilization of
-	 * tasks within the cgroup.
-	 */
-	boost_bias_write(&st->css, NULL, state);
+		/*
+		 * Enable crucial for foreground to also allow zygote tasks of the
+		 * cgroup to be placed on the highest orig cap idle cpu to reduce
+		 * latency without hampering top-app tasks from occupying most of
+		 * idle cpus.
+		 */
+		crucial_write(&st->css, NULL, state);
+	}
+
+	/* Set active limits if state is true */
+	if (state)
+		sugov_flags |= SUGOV_LIMIT_ACTIVE;
 
 	for_each_possible_cpu(cpu) {
 		struct rq *rq = cpu_rq(cpu);
