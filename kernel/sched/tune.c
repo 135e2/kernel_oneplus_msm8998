@@ -1115,20 +1115,20 @@ static void set_fb(u64 time)
 		 * Enable bias to retain fair conditions for top-app tasks for cases 
 		 * that the dynamic boost is set to 0.
 		 */
-		boost_bias_write(&st->css, NULL, state);
+		st->boost_bias = state;
 
 		/*
 		 * Enable prefer_idle in order to bias migrating top-app tasks
 		 * to idle cores along with boost bias to favor high capacity cpus.
 		 */
-		prefer_idle_write(&st->css, NULL, state);
+		st->prefer_idle = state;
 
 		/*
 		 * Enable crucial in order to bias migrating top-app zygote tasks 
 		 * to the highest orig capacity idle cpu at the time of the task's 
 		 * CPU selection.
 		 */
-		crucial_write(&st->css, NULL, state);
+		st->crucial = state;
 	}
 
 	st = stune_get_by_name("foreground");
@@ -1138,7 +1138,7 @@ static void set_fb(u64 time)
 		 * to big cluster without artificially increasing utilization of
 		 * tasks within the cgroup.
 		 */
-		boost_bias_write(&st->css, NULL, state);
+		st->boost_bias = state;
 
 		/*
 		 * Enable crucial for foreground to also allow zygote tasks of the
@@ -1146,7 +1146,7 @@ static void set_fb(u64 time)
 		 * latency without hampering top-app tasks from occupying most of
 		 * idle cpus.
 		 */
-		crucial_write(&st->css, NULL, state);
+		st->crucial = state;
 	}
 
 	/* Set active limits if state is true */
