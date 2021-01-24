@@ -149,7 +149,8 @@ struct schedtune {
 	 * towards idle CPUs */
 	int prefer_idle;
 
-	/* Task will be scheduled on the CPU with the highest spare capacity */
+	/* Allow prefer idle to occur in !prefer_idle SchedTune CGroup but 
+	 * only for zygote tasks */
 	int crucial;
 };
 
@@ -645,33 +646,11 @@ int schedtune_prefer_idle(struct task_struct *p)
 	rcu_read_lock();
 	st = task_schedtune(p);
 	prefer_idle = st->prefer_idle;
+	if (!prefer_idle && st->crucial)
+		prefer_idle = task_is_zygote(p);
 	rcu_read_unlock();
 
 	return prefer_idle;
-}
-
-int schedtune_crucial(struct task_struct *p)
-{
-	struct schedtune *st;
-	int crucial;
-
-	if (unlikely(!schedtune_initialized))
-		return 0;
-
-	/* Do not tune tasks in iowait */
-	if (unlikely(p->in_iowait))
-		return 0;
-
-	if (!task_is_zygote(p))
-		return 0;
-
-	/* Get crucial value */
-	rcu_read_lock();
-	st = task_schedtune(p);
-	crucial = st->crucial;
-	rcu_read_unlock();
-
-	return crucial;
 }
 
 static u64
@@ -715,7 +694,7 @@ crucial_read(struct cgroup_subsys_state *css, struct cftype *cft)
 {
 	struct schedtune *st = css_st(css);
 
-	return st->crucial;
+	return st->crucial || st->prefer_idle;
 }
 
 static int
@@ -1122,13 +1101,6 @@ static void set_fb(u64 time)
 		 * to idle cores along with boost bias to favor high capacity cpus.
 		 */
 		st->prefer_idle = state;
-
-		/*
-		 * Enable crucial in order to bias migrating top-app zygote tasks 
-		 * to the highest orig capacity idle cpu at the time of the task's 
-		 * CPU selection.
-		 */
-		st->crucial = state;
 	}
 
 	st = stune_get_by_name("foreground");
@@ -1141,10 +1113,10 @@ static void set_fb(u64 time)
 		st->boost_bias = state;
 
 		/*
-		 * Enable crucial for foreground to also allow zygote tasks of the
-		 * cgroup to be placed on the highest orig cap idle cpu to reduce
-		 * latency without hampering top-app tasks from occupying most of
-		 * idle cpus.
+		 * Enable crucial in order to bias migrating foreground tasks
+		 * to idle cores without foreground cgroup competing with top-app 
+		 * for idle cpus during normal operations by making the bias
+		 * exclusive for zygote tasks only.
 		 */
 		st->crucial = state;
 	}

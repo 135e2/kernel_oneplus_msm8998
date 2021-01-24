@@ -6901,13 +6901,8 @@ static int start_cpu(bool boosted)
 	return boosted ? rd->max_cap_orig_cpu : rd->min_cap_orig_cpu;
 }
 
-/*
- * Store last crucial cpu to avoid overscheduling on a target.
- */
-static atomic_t last_crucial_cpu = ATOMIC_INIT(-1);
-
 static inline int find_best_target(struct task_struct *p, int *backup_cpu,
-				   bool boosted, bool prefer_idle, bool crucial)
+				   bool boosted, bool prefer_idle)
 {
 	unsigned long min_util = boosted_task_util(p);
 	unsigned long target_capacity = ULONG_MAX;
@@ -6915,14 +6910,12 @@ static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 	unsigned long target_max_spare_cap = 0;
 	unsigned long best_active_util = ULONG_MAX;
 	unsigned long target_idle_max_spare_cap = 0;
-	unsigned long crucial_max_cap = 0;
 	int best_idle_cstate = INT_MAX;
 	struct sched_domain *sd;
 	struct sched_group *sg;
 	int best_active_cpu = -1;
 	int best_idle_cpu = -1;
 	int target_cpu = -1;
-	int crucial_cpu = -1;
 	int cpu, i;
 	struct task_struct *curr_tsk;
 
@@ -6974,36 +6967,6 @@ static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 
 			if (walt_cpu_high_irqload(i))
 				continue;
-
-			/*
-			 * Skip other calculations if the task is crucial. If the
-			 * crucial_cpu has been established then skip other cpus unless
-			 * if a cpu with higher capacity is found in which that cpu will
-			 * get tracked instead.
-			 */
-			if (crucial) {
-
-				/* Skip last crucial cpu */
-				if (atomic_read(&last_crucial_cpu) == i)
-					continue;
-
-				/* Only allow idle_cpus to be tracked, skip if not. */
-				if (idle_cpu(i)) {
-
-					/*
-					 * Skip idle cpus with less than or equal to established crucial max
-					 * capacity.
-					 */
-					if (capacity_orig <= crucial_max_cap)
-						continue;
-
-					crucial_max_cap = capacity_orig;
-					crucial_cpu = i;
-					continue;
-				}
-				if (crucial_cpu != -1)
-					continue;
-			}
 
 			/*
 			 * p's blocked utilization is still accounted for on prev_cpu
@@ -7238,21 +7201,6 @@ static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 
 	} while (sg = sg->next, sg != sd->groups);
 
-	if (crucial) {
-		/* If a compatible crucial CPU was found, use it and skip the backup path */
-		if (crucial_cpu != -1) {
-			trace_sched_find_best_target(p, prefer_idle, min_util, cpu,
-						best_idle_cpu, best_active_cpu,
-						crucial_cpu);
-
-			atomic_set(&last_crucial_cpu, crucial_cpu);
-			return crucial_cpu;
-		}
-
-		/* Reset last_crucial_cpu if there was no crucial_cpu found */
-		atomic_set(&last_crucial_cpu, -1);
-	}
-
 	/*
 	 * For non latency sensitive tasks, cases B and C in the previous loop,
 	 * we pick the best IDLE CPU only if we was not able to find a target
@@ -7359,7 +7307,7 @@ static int select_energy_cpu_brute(struct task_struct *p, int prev_cpu,
 {
 	struct sched_domain *sd;
 	int target_cpu = prev_cpu, tmp_target, tmp_backup;
-	bool boosted, prefer_idle, crucial;
+	bool boosted, prefer_idle;
 
 	schedstat_inc(p, se.statistics.nr_wakeups_secb_attempts);
 	schedstat_inc(this_rq(), eas_stats.secb_attempts);
@@ -7368,10 +7316,8 @@ static int select_energy_cpu_brute(struct task_struct *p, int prev_cpu,
 	boosted = task_is_boosted(p);
 #ifdef CONFIG_CGROUP_SCHEDTUNE
 	prefer_idle = schedtune_prefer_idle(p) > 0;
-	crucial = schedtune_crucial(p) > 0;
 #else
 	prefer_idle = 0;
-	crucial = 0;
 #endif
 
 	sync_entity_load_avg(&p->se);
@@ -7379,13 +7325,13 @@ static int select_energy_cpu_brute(struct task_struct *p, int prev_cpu,
 	sd = rcu_dereference(per_cpu(sd_ea, prev_cpu));
 	/* Find a cpu with sufficient capacity */
 	tmp_target = find_best_target(p, &tmp_backup,
-		boosted || sync_boost, prefer_idle, crucial);
+					boosted || sync_boost, prefer_idle);
 
 	if (!sd)
 		goto unlock;
 	if (tmp_target >= 0) {
 		target_cpu = tmp_target;
-		if ((boosted || prefer_idle || crucial) && idle_cpu(target_cpu)) {
+		if ((boosted || prefer_idle) && idle_cpu(target_cpu)) {
 			schedstat_inc(p, se.statistics.nr_wakeups_secb_idle_bt);
 			schedstat_inc(this_rq(), eas_stats.secb_idle_bt);
 			goto unlock;
