@@ -925,6 +925,8 @@ static void write_default_values(struct cgroup_subsys_state *css)
 		struct st_data tgt = st_targets[i];
 
 		if (!strcmp(css->cgroup->kn->name, tgt.name)) {
+			struct schedtune *st = css_st(css);
+
 			pr_info("stune_assist: setting values for %s: boost=%d boost_bias=%d prefer_idle=%d crucial=%d\n", 
 				tgt.name, tgt.boost, tgt.boost_bias, tgt.prefer_idle, tgt.crucial);
 
@@ -936,9 +938,9 @@ static void write_default_values(struct cgroup_subsys_state *css)
 #else 
 			boost_write(css, NULL, tgt.boost);
 #endif/* CONFIG_DYNAMIC_STUNE */
-			boost_bias_write(css, NULL, tgt.boost_bias);
-			prefer_idle_write(css, NULL, tgt.prefer_idle);
-			crucial_write(css, NULL, tgt.crucial);
+			st->boost_bias = tgt.boost_bias;
+			st->prefer_idle = tgt.prefer_idle;
+			st->crucial = tgt.crucial;
 		}
 	}
 }
