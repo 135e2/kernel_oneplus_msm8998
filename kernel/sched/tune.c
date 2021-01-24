@@ -573,6 +573,10 @@ int schedtune_task_boost(struct task_struct *p)
 	if (unlikely(!schedtune_initialized))
 		return 0;
 
+	/* Do not tune tasks in iowait */
+	if (p->in_iowait)
+		return 0;
+
 	/* Get task boost value */
 	rcu_read_lock();
 	st = task_schedtune(p);
@@ -588,6 +592,10 @@ int schedtune_boost_bias(struct task_struct *p)
 	int boost_bias;
 
 	if (unlikely(!schedtune_initialized))
+		return 0;
+
+	/* Do not tune tasks in iowait */
+	if (p->in_iowait)
 		return 0;
 
 	/* Get boost_bias value */
@@ -610,6 +618,10 @@ int schedtune_boost_bias_rcu_locked(struct task_struct *p)
 	if (unlikely(!schedtune_initialized))
 		return 0;
 
+	/* Do not tune tasks in iowait */
+	if (p->in_iowait)
+		return 0;
+
 	/* Get boost_bias value */
 	st = task_schedtune(p);
 	boost_bias = st->boost_bias;
@@ -623,6 +635,10 @@ int schedtune_prefer_idle(struct task_struct *p)
 	int prefer_idle;
 
 	if (unlikely(!schedtune_initialized))
+		return 0;
+
+	/* Do not tune tasks in iowait */
+	if (p->in_iowait)
 		return 0;
 
 	/* Get prefer_idle value */
@@ -640,6 +656,10 @@ int schedtune_crucial(struct task_struct *p)
 	int crucial;
 
 	if (unlikely(!schedtune_initialized))
+		return 0;
+
+	/* Do not tune tasks in iowait */
+	if (p->in_iowait)
 		return 0;
 
 	/* Get crucial value */

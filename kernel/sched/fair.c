@@ -5092,18 +5092,6 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	 */
 	schedtune_enqueue_task(p, cpu_of(rq));
 
-	/*
-	 * If in_iowait is set, the code below may not trigger any cpufreq
-	 * utilization updates, so do it here explicitly with the IOWAIT flag
-	 * passed.
-	 * 
-	 * We only trigger the iowait boost if only the task belongs to either
-	 * top-app or foreground cgroup.
-	 */
-	if (p->in_iowait && (task_belongs_to_st(p, "top-app") || 
-		task_belongs_to_st(p, "foreground")))
-		cpufreq_update_util(rq, SCHED_CPUFREQ_IOWAIT);
-
 	for_each_sched_entity(se) {
 		if (se->on_rq)
 			break;
@@ -6129,6 +6117,10 @@ static inline bool task_fits_cap(struct task_struct *p, int cpu)
 	unsigned long capacity = capacity_orig_of(cpu);
 	unsigned long max_capacity = cpu_rq(cpu)->rd->max_cpu_capacity.val;
 	int min_cpu = cpu_rq(cpu)->rd->min_cap_orig_cpu;
+
+	/* Do not allow iowait tasks to occupy perf cluster */
+	if (p->in_iowait && cpumask_test_cpu(cpu, cpu_perf_mask))
+		return false;
 
 	if (capacity == max_capacity)
 		return true;
