@@ -1714,6 +1714,7 @@ static unsigned int tcp_mss_split_point(const struct sock *sk,
 
 	return needed;
 }
+EXPORT_SYMBOL(tcp_tso_autosize);
 
 /* Can at least one segment of SKB be sent right now, according to the
  * congestion window rules?  If so, return how many segments are allowed.
